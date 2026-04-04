@@ -141,10 +141,16 @@ def _setup_github(root: Path, repo_name: str) -> None:
             )
 
     # Push initial commit (best-effort — don't fail init if push fails)
-    subprocess.run(
+    push_result = subprocess.run(
         ["git", "push", "-u", "origin", "main"],
-        cwd=root, capture_output=True,
+        cwd=root, capture_output=True, text=True,
     )
+    if push_result.returncode != 0:
+        import logging
+        logging.getLogger(__name__).warning(
+            f"GitHub repo created but initial push failed: "
+            f"{push_result.stderr.strip() or f'exit code {push_result.returncode}'}"
+        )
 
 
 def _write_if_missing(path: Path, content: str) -> None:
