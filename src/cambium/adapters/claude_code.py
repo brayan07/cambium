@@ -28,9 +28,9 @@ class ClaudeCodeAdapter(AdapterType):
 
     name = "claude-code"
 
-    def __init__(self, skill_registry: SkillRegistry, framework_dir: Path | None = None) -> None:
+    def __init__(self, skill_registry: SkillRegistry, user_dir: Path | None = None) -> None:
         self.skill_registry = skill_registry
-        self.framework_dir = framework_dir
+        self.user_dir = user_dir
         # Track which sessions have been started (for --resume logic)
         self._active_sessions: set[str] = set()
 
@@ -43,11 +43,12 @@ class ClaudeCodeAdapter(AdapterType):
         api_base_url: str = "",
         live: bool = True,
         on_event: Callable[[dict[str, Any]], None] | None = None,
+        cwd: Path | None = None,
     ) -> RunResult:
         if not live:
             return self._mock_send(instance, user_message, session_id, on_event)
         return self._live_send(
-            instance, user_message, session_id, session_token, api_base_url, on_event
+            instance, user_message, session_id, session_token, api_base_url, on_event, cwd
         )
 
     def _mock_send(
@@ -71,6 +72,7 @@ class ClaudeCodeAdapter(AdapterType):
         session_token: str,
         api_base_url: str,
         on_event: Callable[[dict[str, Any]], None] | None = None,
+        cwd: Path | None = None,
     ) -> RunResult:
         start = time.monotonic()
         tmp_dir = None
@@ -120,6 +122,7 @@ class ClaudeCodeAdapter(AdapterType):
                 stderr=subprocess.PIPE,
                 text=True,
                 env=env,
+                cwd=cwd,
             )
 
             assert proc.stdin is not None
@@ -221,19 +224,21 @@ class ClaudeCodeAdapter(AdapterType):
     def _load_system_prompt(self, config: dict) -> str:
         """Load system prompt from the path specified in config.
 
-        Paths are resolved relative to framework_dir if not absolute.
+        Paths are resolved relative to user_dir if not absolute.
         """
         prompt_path = config.get("system_prompt_path", "")
         if not prompt_path:
             return ""
         path = Path(prompt_path)
-        if not path.is_absolute() and self.framework_dir:
-            path = self.framework_dir / path
+        if not path.is_absolute() and self.user_dir:
+            path = self.user_dir / path
         if path.exists():
             return path.read_text()
         return ""
 
-    def launch_interactive(self, instance: AdapterInstance, session_id: str) -> None:
+    def launch_interactive(
+        self, instance: AdapterInstance, session_id: str, cwd: Path | None = None,
+    ) -> None:
         """Launch Claude Code in interactive mode.
 
         Builds the skills directory and system prompt, then execs into
@@ -266,6 +271,8 @@ class ClaudeCodeAdapter(AdapterType):
             f"instance='{instance.name}' model={model}"
         )
 
+        if cwd:
+            os.chdir(cwd)
         os.execvp("claude", cmd)
 
 

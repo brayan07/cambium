@@ -77,6 +77,7 @@ class AdapterType(ABC):
         api_base_url: str = "",
         live: bool = True,
         on_event: Callable[[dict[str, Any]], None] | None = None,
+        cwd: Path | None = None,
     ) -> RunResult:
         """Send a message in a session context.
 
@@ -98,6 +99,7 @@ class AdapterType(ABC):
         self,
         instance: AdapterInstance,
         session_id: str,
+        cwd: Path | None = None,
     ) -> None:
         """Launch the adapter's native interactive experience.
 

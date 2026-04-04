@@ -15,17 +15,17 @@ from cambium.server.auth import create_session_token
 def server(tmp_path: Path) -> CambiumServer:
     import cambium.server.app as app_module
 
-    fw = tmp_path / "framework"
+    user_dir = tmp_path / "user"
 
-    # Skill library (under adapter type)
-    skills_dir = fw / "defaults" / "skills"
+    # Skill library
+    skills_dir = user_dir / "adapters" / "claude-code" / "skills"
     skills_dir.mkdir(parents=True)
     basic = skills_dir / "basic"
     basic.mkdir()
     (basic / "SKILL.md").write_text("---\nname: basic\n---\n# Basic\n")
 
     # Adapter instances
-    instances_dir = fw / "defaults" / "adapters" / "claude-code" / "instances"
+    instances_dir = user_dir / "adapters" / "claude-code" / "instances"
     instances_dir.mkdir(parents=True)
     (instances_dir / "handler.yaml").write_text(
         "name: handler\nadapter_type: claude-code\n"
@@ -33,19 +33,15 @@ def server(tmp_path: Path) -> CambiumServer:
     )
 
     # Routines
-    routines_dir = fw / "defaults" / "routines"
+    routines_dir = user_dir / "routines"
     routines_dir.mkdir(parents=True)
     (routines_dir / "handler.yaml").write_text(
         "name: handler\nadapter_instance: handler\n"
         "listen: [tasks, goals]\npublish: [results]\n"
     )
 
-    user_dir = tmp_path / "user"
-    user_dir.mkdir()
-
     srv = build_server(
         db_path=":memory:",
-        framework_dir=fw,
         user_dir=user_dir,
         live=False,
         poll_interval=0.1,

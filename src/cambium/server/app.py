@@ -136,14 +136,16 @@ def _authenticate(authorization: str | None) -> dict:
 
 def build_server(
     db_path: str | None = None,
-    framework_dir: Path | None = None,
     user_dir: Path | None = None,
     live: bool = False,
     poll_interval: float = 2.0,
     api_base_url: str = "http://127.0.0.1:8350",
 ) -> CambiumServer:
-    """Construct all Cambium components and return a CambiumServer."""
-    framework_dir = framework_dir or Path(__file__).parent.parent.parent.parent
+    """Construct all Cambium components and return a CambiumServer.
+
+    All configuration is read from ``user_dir`` (default ``~/.cambium/``).
+    Run ``cambium init`` first to seed the user directory from framework defaults.
+    """
     user_dir = user_dir or Path.home() / ".cambium"
 
     # Queue
@@ -153,30 +155,20 @@ def build_server(
         db_path = str(db_dir / "cambium.db")
     queue = SQLiteQueue(db_path)
 
-    # Skill registry (owned by Claude Code adapter type)
-    skill_dirs = [framework_dir / "defaults" / "adapters" / "claude-code" / "skills"]
-    if (user_dir / "adapters" / "claude-code" / "skills").exists():
-        skill_dirs.append(user_dir / "adapters" / "claude-code" / "skills")
-    skill_registry = SkillRegistry(*skill_dirs)
+    # Skill registry
+    skill_dirs = [user_dir / "adapters" / "claude-code" / "skills"]
+    skill_registry = SkillRegistry(*[d for d in skill_dirs if d.exists()])
 
     # Adapter instances
-    instance_dirs = []
-    adapter_instances_dir = framework_dir / "defaults" / "adapters" / "claude-code" / "instances"
-    if adapter_instances_dir.exists():
-        instance_dirs.append(adapter_instances_dir)
-    if (user_dir / "adapters" / "claude-code" / "instances").exists():
-        instance_dirs.append(user_dir / "adapters" / "claude-code" / "instances")
-    instance_registry = AdapterInstanceRegistry(*instance_dirs)
+    instance_dirs = [user_dir / "adapters" / "claude-code" / "instances"]
+    instance_registry = AdapterInstanceRegistry(*[d for d in instance_dirs if d.exists()])
 
     # Adapter types
-    claude_adapter = ClaudeCodeAdapter(skill_registry, framework_dir=framework_dir)
+    claude_adapter = ClaudeCodeAdapter(skill_registry, user_dir=user_dir)
     adapter_types = {claude_adapter.name: claude_adapter}
 
     # Routine registry
-    routine_dirs = [framework_dir / "defaults" / "routines"]
-    if (user_dir / "routines").exists():
-        routine_dirs.append(user_dir / "routines")
-    routine_registry = RoutineRegistry(*routine_dirs)
+    routine_registry = RoutineRegistry(*[d for d in [user_dir / "routines"] if d.exists()])
 
     # Session store (shares DB with queue)
     session_store = SessionStore(db_path)
@@ -190,6 +182,7 @@ def build_server(
         instance_registry=instance_registry,
         session_store=session_store,
         api_base_url=api_base_url,
+        user_dir=user_dir,
     )
 
     # Configure session endpoints
