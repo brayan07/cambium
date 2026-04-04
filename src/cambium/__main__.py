@@ -24,7 +24,7 @@ def cmd_server(args: argparse.Namespace) -> None:
     )
 
 
-def cmd_fire(args: argparse.Namespace) -> None:
+def cmd_send(args: argparse.Namespace) -> None:
     import urllib.request
     import urllib.error
 
@@ -33,22 +33,17 @@ def cmd_fire(args: argparse.Namespace) -> None:
         try:
             payload = json.loads(args.payload)
         except json.JSONDecodeError:
-            # Treat as a simple string payload
             payload = {"message": args.payload}
 
-    body = json.dumps({
-        "type": args.event_type,
-        "payload": payload,
-        "source": args.source,
-    }).encode()
+    body = json.dumps({"payload": payload}).encode()
 
-    url = f"http://{args.host}:{args.port}/events"
+    url = f"http://{args.host}:{args.port}/channels/{args.channel}/send"
     req = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json"})
 
     try:
         with urllib.request.urlopen(req) as resp:
             result = json.loads(resp.read())
-            print(f"Event enqueued: {result['type']} (id={result['id'][:8]})")
+            print(f"Message sent to '{result['channel']}' (id={result['id'][:8]})")
     except urllib.error.URLError as e:
         print(f"Error: Could not reach Cambium server at {url} — {e}", file=sys.stderr)
         sys.exit(1)
@@ -69,21 +64,20 @@ def main() -> None:
     srv.add_argument("--poll-interval", type=float, default=2.0, help="Consumer poll interval in seconds")
     srv.add_argument("-v", "--verbose", action="store_true")
 
-    # fire
-    fire = sub.add_parser("fire", help="Enqueue an event via the API")
-    fire.add_argument("event_type", help="Event type (e.g. goal_created)")
-    fire.add_argument("payload", nargs="?", default="{}", help="JSON payload or plain string")
-    fire.add_argument("--source", default="cli")
-    fire.add_argument("--host", default="127.0.0.1")
-    fire.add_argument("--port", type=int, default=8350)
+    # send
+    send = sub.add_parser("send", help="Send a message to a channel via the API")
+    send.add_argument("channel", help="Channel name (e.g. goals, tasks)")
+    send.add_argument("payload", nargs="?", default="{}", help="JSON payload or plain string")
+    send.add_argument("--host", default="127.0.0.1")
+    send.add_argument("--port", type=int, default=8350)
 
     args = parser.parse_args()
     if args.command == "init":
         cmd_init(args)
     elif args.command == "server":
         cmd_server(args)
-    elif args.command == "fire":
-        cmd_fire(args)
+    elif args.command == "send":
+        cmd_send(args)
     else:
         parser.print_help()
 

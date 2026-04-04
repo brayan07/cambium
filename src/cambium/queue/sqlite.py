@@ -1,4 +1,4 @@
-"""SQLite-backed event queue."""
+"""SQLite-backed message queue."""
 
 from __future__ import annotations
 
@@ -6,12 +6,12 @@ import json
 import sqlite3
 from datetime import datetime, timezone
 
-from cambium.models.event import Event
+from cambium.models.message import Message
 from cambium.queue.base import QueueAdapter
 
 
 class SQLiteQueue(QueueAdapter):
-    """SQLite-backed FIFO event queue with at-least-once delivery."""
+    """SQLite-backed FIFO message queue with at-least-once delivery."""
 
     def __init__(self, db_path: str = ":memory:", max_attempts: int = 3) -> None:
         self._conn = sqlite3.connect(db_path, check_same_thread=False)
@@ -21,9 +21,9 @@ class SQLiteQueue(QueueAdapter):
 
     def _create_table(self) -> None:
         self._conn.execute("""
-            CREATE TABLE IF NOT EXISTS events (
+            CREATE TABLE IF NOT EXISTS messages (
                 id TEXT PRIMARY KEY,
-                type TEXT NOT NULL,
+                channel TEXT NOT NULL,
                 payload TEXT NOT NULL,
                 source TEXT NOT NULL,
                 timestamp TEXT NOT NULL,
@@ -33,36 +33,34 @@ class SQLiteQueue(QueueAdapter):
             )
         """)
         self._conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_events_status_type ON events (status, type)"
+            "CREATE INDEX IF NOT EXISTS idx_messages_status_channel ON messages (status, channel)"
         )
         self._conn.commit()
 
-    def enqueue(self, event: Event) -> None:
-        """Add an event to the queue."""
+    def publish(self, message: Message) -> None:
         self._conn.execute(
-            "INSERT INTO events (id, type, payload, source, timestamp, status, attempts) "
+            "INSERT INTO messages (id, channel, payload, source, timestamp, status, attempts) "
             "VALUES (?, ?, ?, ?, ?, 'pending', 0)",
             (
-                event.id,
-                event.type,
-                json.dumps(event.payload),
-                event.source,
-                event.timestamp.isoformat(),
+                message.id,
+                message.channel,
+                json.dumps(message.payload),
+                message.source,
+                message.timestamp.isoformat(),
             ),
         )
         self._conn.commit()
 
-    def dequeue(self, event_types: list[str], limit: int = 1) -> list[Event]:
-        """Atomically claim up to `limit` pending events matching the given types."""
-        if not event_types:
+    def consume(self, channels: list[str], limit: int = 1) -> list[Message]:
+        if not channels:
             return []
-        placeholders = ",".join("?" for _ in event_types)
+        placeholders = ",".join("?" for _ in channels)
         now = datetime.now(timezone.utc).isoformat()
 
         cursor = self._conn.execute(
-            f"SELECT id FROM events WHERE status = 'pending' AND type IN ({placeholders}) "
+            f"SELECT id FROM messages WHERE status = 'pending' AND channel IN ({placeholders}) "
             f"ORDER BY timestamp ASC LIMIT ?",
-            (*event_types, limit),
+            (*channels, limit),
         )
         ids = [row[0] for row in cursor.fetchall()]
         if not ids:
@@ -70,30 +68,28 @@ class SQLiteQueue(QueueAdapter):
 
         id_placeholders = ",".join("?" for _ in ids)
         self._conn.execute(
-            f"UPDATE events SET status = 'in_flight', claimed_at = ? "
+            f"UPDATE messages SET status = 'in_flight', claimed_at = ? "
             f"WHERE id IN ({id_placeholders})",
             (now, *ids),
         )
         self._conn.commit()
 
         cursor = self._conn.execute(
-            f"SELECT id, type, payload, source, timestamp, status, attempts, claimed_at "
-            f"FROM events WHERE id IN ({id_placeholders}) ORDER BY timestamp ASC",
+            f"SELECT id, channel, payload, source, timestamp, status, attempts, claimed_at "
+            f"FROM messages WHERE id IN ({id_placeholders}) ORDER BY timestamp ASC",
             ids,
         )
-        return [self._row_to_event(row) for row in cursor.fetchall()]
+        return [self._row_to_message(row) for row in cursor.fetchall()]
 
-    def ack(self, event_id: str) -> None:
-        """Mark an event as done."""
+    def ack(self, message_id: str) -> None:
         self._conn.execute(
-            "UPDATE events SET status = 'done' WHERE id = ?", (event_id,)
+            "UPDATE messages SET status = 'done' WHERE id = ?", (message_id,)
         )
         self._conn.commit()
 
-    def nack(self, event_id: str) -> None:
-        """Return event for retry, or mark failed if max attempts exceeded."""
+    def nack(self, message_id: str) -> None:
         cursor = self._conn.execute(
-            "SELECT attempts FROM events WHERE id = ?", (event_id,)
+            "SELECT attempts FROM messages WHERE id = ?", (message_id,)
         )
         row = cursor.fetchone()
         if row is None:
@@ -101,37 +97,36 @@ class SQLiteQueue(QueueAdapter):
         new_attempts = row[0] + 1
         if new_attempts >= self._max_attempts:
             self._conn.execute(
-                "UPDATE events SET status = 'failed', attempts = ? WHERE id = ?",
-                (new_attempts, event_id),
+                "UPDATE messages SET status = 'failed', attempts = ? WHERE id = ?",
+                (new_attempts, message_id),
             )
         else:
             self._conn.execute(
-                "UPDATE events SET status = 'pending', attempts = ?, claimed_at = NULL WHERE id = ?",
-                (new_attempts, event_id),
+                "UPDATE messages SET status = 'pending', attempts = ?, claimed_at = NULL WHERE id = ?",
+                (new_attempts, message_id),
             )
         self._conn.commit()
 
-    def pending_count(self, event_types: list[str] | None = None) -> int:
-        """Count pending events, optionally filtered by type."""
-        if event_types is None:
+    def pending_count(self, channels: list[str] | None = None) -> int:
+        if channels is None:
             cursor = self._conn.execute(
-                "SELECT COUNT(*) FROM events WHERE status = 'pending'"
+                "SELECT COUNT(*) FROM messages WHERE status = 'pending'"
             )
         else:
-            if not event_types:
+            if not channels:
                 return 0
-            placeholders = ",".join("?" for _ in event_types)
+            placeholders = ",".join("?" for _ in channels)
             cursor = self._conn.execute(
-                f"SELECT COUNT(*) FROM events WHERE status = 'pending' AND type IN ({placeholders})",
-                event_types,
+                f"SELECT COUNT(*) FROM messages WHERE status = 'pending' AND channel IN ({placeholders})",
+                channels,
             )
         return cursor.fetchone()[0]
 
     @staticmethod
-    def _row_to_event(row: tuple) -> Event:
-        return Event(
+    def _row_to_message(row: tuple) -> Message:
+        return Message(
             id=row[0],
-            type=row[1],
+            channel=row[1],
             payload=json.loads(row[2]),
             source=row[3],
             timestamp=datetime.fromisoformat(row[4]),

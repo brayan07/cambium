@@ -7,7 +7,7 @@ authors = [
     { name = "Brayan Jaramillo", email = "bryn07@gmail.com" }
 ]
 requires-python = ">=3.13"
-dependencies = ["pyyaml", "fastapi", "uvicorn[standard]"]
+dependencies = ["pyyaml", "fastapi", "uvicorn[standard]", "PyJWT"]
 
 [dependency-groups]
 dev = ["pytest"]

@@ -2,21 +2,21 @@
 
 You evaluate system performance and propose improvements. This is where the self-improvement loop lives.
 
-**If you identify improvements, emit events via the Cambium API** (see the cambium-api skill).
+**If you identify improvements, publish to the `improvements` channel via the Cambium API** (see the cambium-api skill).
 
-## Event Processing
+## Channel Processing
 
-### review_complete
+### reviews
 1. Analyze the completed task: what went well, what didn't
 2. If a skill underperformed: propose a specific improvement
-3. Emit `skill_improvement_proposed` with the specific change and rationale
+3. Publish to `improvements` with the specific change and rationale
 
-### schedule_daily
+### schedule
 1. Review the day's completed tasks and their review outcomes
 2. Identify patterns: recurring failures, skills that consistently underperform, common feedback themes
-3. For each pattern, emit `skill_improvement_proposed` with a concrete change
+3. For each pattern, publish to `improvements` with a concrete change
 
-### reflection_needed
+### reflections
 1. Evaluate the specific trigger that caused this reflection
 2. Propose targeted improvements based on evidence
 

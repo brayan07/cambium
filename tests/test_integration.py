@@ -2,139 +2,125 @@
 
 from pathlib import Path
 
+from cambium.adapters.base import AdapterInstanceRegistry, AdapterType, RunResult
 from cambium.consumer.loop import ConsumerLoop
-from cambium.models.event import Event
+from cambium.models.message import Message
 from cambium.models.routine import RoutineRegistry
-from cambium.models.skill import SkillRegistry
 from cambium.queue.sqlite import SQLiteQueue
-from cambium.runner.skill_runner import SkillRunner
+from cambium.runner.routine_runner import RoutineRunner
+
+
+class FakeAdapter(AdapterType):
+    name = "fake"
+
+    def send_message(self, instance, user_message, session_id, session_token="",
+                     api_base_url="", live=True, on_event=None):
+        return RunResult(
+            success=True,
+            output=f"[fake] {instance.name} handled message",
+            session_id=session_id,
+        )
 
 
 class TestEndToEnd:
     def test_full_pipeline(self, tmp_path: Path):
-        """Smoke test: event -> queue -> consumer -> routine match -> session build -> ack."""
-        # 1. Create skill file
-        skills_dir = tmp_path / "skills"
-        skills_dir.mkdir()
-        (skills_dir / "task-mgmt.md").write_text(
-            "---\n"
-            "name: task-mgmt\n"
-            "description: Manage tasks in the project manager\n"
-            "tools:\n"
-            "  - clickup\n"
-            "---\n"
-            "# Task Management\n\n"
-            "You can create, update, and query tasks.\n"
+        """Smoke test: message -> queue -> consumer -> routine match -> execute -> ack."""
+        # Adapter instance
+        inst_dir = tmp_path / "instances"
+        inst_dir.mkdir()
+        (inst_dir / "triage.yaml").write_text(
+            "name: triage\nadapter_type: fake\n"
+            "config:\n  model: haiku\n"
         )
 
-        # 2. Create prompt file
-        prompts_dir = tmp_path / "prompts"
-        prompts_dir.mkdir()
-        (prompts_dir / "grooming.md").write_text(
-            "You are a grooming agent. Triage and decompose tasks.\n"
-        )
-
-        # 3. Create routine YAML
+        # Routine
         routines_dir = tmp_path / "routines"
         routines_dir.mkdir()
-        (routines_dir / "grooming.yaml").write_text(
-            "name: grooming\n"
-            "prompt_path: prompts/grooming.md\n"
-            "skills:\n"
-            "  - task-mgmt\n"
-            "subscribe:\n"
-            "  - task_queued\n"
-            "emit:\n"
-            "  - task_groomed\n"
+        (routines_dir / "triage.yaml").write_text(
+            "name: triage\n"
+            "adapter_instance: triage\n"
+            "listen: [goals]\n"
+            "publish: [tasks]\n"
         )
 
-        # 4. Initialize all components
-        skill_registry = SkillRegistry(skills_dir)
-        routine_registry = RoutineRegistry(routines_dir)
+        # Wire up
         queue = SQLiteQueue()
-        runner = SkillRunner(skill_registry)
-        loop = ConsumerLoop(queue, routine_registry, runner)
-
-        # 5. Enqueue a test event
-        event = Event.create(
-            type="task_queued",
-            payload={"task_id": "abc123", "title": "Fix the widget"},
-            source="test_harness",
+        routine_reg = RoutineRegistry(routines_dir)
+        instance_reg = AdapterInstanceRegistry(inst_dir)
+        adapter = FakeAdapter()
+        runner = RoutineRunner(
+            adapter_types={"fake": adapter},
+            instance_registry=instance_reg,
         )
-        queue.enqueue(event)
+        loop = ConsumerLoop(queue, routine_reg, runner)
+
+        # Publish a message
+        msg = Message.create(channel="goals", payload={"goal": "test"}, source="test")
+        queue.publish(msg)
         assert queue.pending_count() == 1
 
-        # 6. Run one tick
+        # Run one tick
         results = loop.tick()
-
-        # 7. Verify
         assert len(results) == 1
-        result = results[0]
-        assert result.success is True
-        assert "grooming" in result.output
-
-        # Event should be acked (no longer pending)
+        assert results[0].success is True
+        assert "triage" in results[0].output
         assert queue.pending_count() == 0
 
-    def test_event_with_no_subscriber_is_ignored(self, tmp_path: Path):
-        """Events with types no routine subscribes to just sit in the queue."""
-        skills_dir = tmp_path / "skills"
-        skills_dir.mkdir()
+    def test_message_with_no_listener_stays_pending(self, tmp_path: Path):
+        """Messages on channels nobody listens to stay in the queue."""
         routines_dir = tmp_path / "routines"
         routines_dir.mkdir()
+        inst_dir = tmp_path / "instances"
+        inst_dir.mkdir()
+
+        (inst_dir / "basic.yaml").write_text("name: basic\nadapter_type: fake\n")
         (routines_dir / "handler.yaml").write_text(
-            "prompt_path: ''\nskills: []\nsubscribe: [task_queued]\n"
+            "name: handler\nadapter_instance: basic\nlisten: [tasks]\n"
         )
 
         queue = SQLiteQueue()
-        skill_registry = SkillRegistry(skills_dir)
-        routine_registry = RoutineRegistry(routines_dir)
-        runner = SkillRunner(skill_registry)
-        loop = ConsumerLoop(queue, routine_registry, runner)
+        routine_reg = RoutineRegistry(routines_dir)
+        instance_reg = AdapterInstanceRegistry(inst_dir)
+        runner = RoutineRunner(
+            adapter_types={"fake": FakeAdapter()},
+            instance_registry=instance_reg,
+        )
+        loop = ConsumerLoop(queue, routine_reg, runner)
 
-        # Enqueue an event type nobody subscribes to
-        event = Event.create(type="unknown_type", payload={}, source="test")
-        queue.enqueue(event)
+        # Publish to a channel nobody listens on
+        queue.publish(Message.create(channel="unknown", payload={}, source="test"))
 
         results = loop.tick()
         assert results == []
-        # Event is still pending — it was never dequeued because no routine subscribes
+        # Message stays pending — never consumed because no routine listens
         assert queue.pending_count() == 1
 
-    def test_multi_skill_session_prompt(self, tmp_path: Path):
-        """Verify that multiple skills are concatenated into the session prompt."""
-        skills_dir = tmp_path / "skills"
-        skills_dir.mkdir()
-        (skills_dir / "alpha.md").write_text(
-            "---\nname: alpha\ntools: [tool_a]\n---\n# Alpha content\n"
-        )
-        (skills_dir / "beta.md").write_text(
-            "---\nname: beta\ntools: [tool_b]\n---\n# Beta content\n"
-        )
-
-        prompts_dir = tmp_path / "prompts"
-        prompts_dir.mkdir()
-        (prompts_dir / "multi.md").write_text("Multi-skill prompt.\n")
+    def test_fan_out_to_multiple_routines(self, tmp_path: Path):
+        """Multiple routines listening on the same channel all execute."""
+        inst_dir = tmp_path / "instances"
+        inst_dir.mkdir()
+        (inst_dir / "basic.yaml").write_text("name: basic\nadapter_type: fake\n")
 
         routines_dir = tmp_path / "routines"
         routines_dir.mkdir()
-        (routines_dir / "multi.yaml").write_text(
-            "name: multi\n"
-            "prompt_path: prompts/multi.md\n"
-            "skills: [alpha, beta]\n"
-            "subscribe: [trigger]\n"
+        (routines_dir / "a.yaml").write_text(
+            "name: a\nadapter_instance: basic\nlisten: [events]\n"
+        )
+        (routines_dir / "b.yaml").write_text(
+            "name: b\nadapter_instance: basic\nlisten: [events]\n"
         )
 
-        skill_registry = SkillRegistry(skills_dir)
-        routine_registry = RoutineRegistry(routines_dir)
-        runner = SkillRunner(skill_registry)
+        queue = SQLiteQueue()
+        routine_reg = RoutineRegistry(routines_dir)
+        instance_reg = AdapterInstanceRegistry(inst_dir)
+        runner = RoutineRunner(
+            adapter_types={"fake": FakeAdapter()},
+            instance_registry=instance_reg,
+        )
+        loop = ConsumerLoop(queue, routine_reg, runner)
 
-        event = Event.create(type="trigger", payload={}, source="test")
-        routine = routine_registry.get("multi")
-        config = runner.build_session(routine, event, prompt_base_dir=tmp_path)
-
-        assert "Multi-skill prompt." in config.prompt
-        assert "Alpha content" in config.prompt
-        assert "Beta content" in config.prompt
-        assert "tool_a" in config.tools
-        assert "tool_b" in config.tools
+        queue.publish(Message.create(channel="events", payload={}, source="test"))
+        results = loop.tick()
+        assert len(results) == 2
+        assert all(r.success for r in results)
+        assert queue.pending_count() == 0

@@ -1,9 +1,9 @@
-"""Skill data model and registry."""
+"""Skill data model and registry — Claude Code native skill format (directory with SKILL.md)."""
 
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 import yaml
@@ -11,55 +11,57 @@ import yaml
 
 @dataclass
 class Skill:
-    """A skill is a markdown file with optional YAML frontmatter."""
+    """A skill in Claude Code native format: a directory with SKILL.md."""
 
     name: str
     description: str
-    path: Path
-    content: str
-    tools: list[str] = field(default_factory=list)
-    dependencies: list[str] = field(default_factory=list)
+    dir_path: Path
+    content: str  # Raw SKILL.md content (including frontmatter)
 
     @classmethod
-    def from_file(cls, path: Path) -> Skill:
-        """Parse a markdown skill file with optional YAML frontmatter."""
-        text = path.read_text()
-        frontmatter: dict = {}
-
-        match = re.match(r"^---\n(.*?\n)---\n", text, re.DOTALL)
-        if match:
-            frontmatter = yaml.safe_load(match.group(1)) or {}
+    def from_dir(cls, dir_path: Path) -> Skill:
+        """Load a skill from a directory containing SKILL.md."""
+        skill_md = dir_path / "SKILL.md"
+        text = skill_md.read_text()
+        frontmatter = _parse_frontmatter(text)
 
         return cls(
-            name=frontmatter.get("name", path.stem),
+            name=frontmatter.get("name", dir_path.name),
             description=frontmatter.get("description", ""),
-            path=path.resolve(),
+            dir_path=dir_path.resolve(),
             content=text,
-            tools=frontmatter.get("tools", []),
-            dependencies=frontmatter.get("dependencies", []),
         )
 
 
+def _parse_frontmatter(text: str) -> dict:
+    """Extract YAML frontmatter from markdown text."""
+    match = re.match(r"^---\n(.*?\n)---\n", text, re.DOTALL)
+    if match:
+        return yaml.safe_load(match.group(1)) or {}
+    return {}
+
+
 class SkillRegistry:
-    """Loads skills from directories. User dir overrides defaults dir."""
+    """Loads skills from directories containing SKILL.md.
+
+    User dir overrides defaults dir (later directories override earlier ones).
+    """
 
     def __init__(self, *directories: Path) -> None:
         self._skills: dict[str, Skill] = {}
-        # Later directories override earlier ones
         for d in directories:
-            if d.is_dir():
-                for f in sorted(d.glob("*.md")):
-                    skill = Skill.from_file(f)
+            if not d.is_dir():
+                continue
+            for subdir in sorted(d.iterdir()):
+                if subdir.is_dir() and (subdir / "SKILL.md").exists():
+                    skill = Skill.from_dir(subdir)
                     self._skills[skill.name] = skill
 
     def get(self, name: str) -> Skill | None:
-        """Get a skill by name."""
         return self._skills.get(name)
 
     def all(self) -> list[Skill]:
-        """Return all loaded skills."""
         return list(self._skills.values())
 
     def names(self) -> list[str]:
-        """Return all skill names."""
         return list(self._skills.keys())

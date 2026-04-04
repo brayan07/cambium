@@ -1,0 +1,1 @@
+"""Adapter types for Cambium."""

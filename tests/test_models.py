@@ -1,69 +1,59 @@
-"""Tests for skill and routine models."""
+"""Tests for skill, routine, message, and adapter instance models."""
 
 from pathlib import Path
 
 from cambium.models.skill import Skill, SkillRegistry
+from cambium.models.message import Message
 from cambium.models.routine import Routine, RoutineRegistry
+from cambium.adapters.base import AdapterInstance, AdapterInstanceRegistry
 
 
 class TestSkill:
-    def test_from_file_with_frontmatter(self, tmp_path: Path):
-        p = tmp_path / "my-skill.md"
-        p.write_text(
+    def test_from_dir_with_frontmatter(self, tmp_path: Path):
+        skill_dir = tmp_path / "my-skill"
+        skill_dir.mkdir()
+        (skill_dir / "SKILL.md").write_text(
             "---\n"
             "name: My Skill\n"
             "description: A test skill\n"
-            "tools:\n"
-            "  - clickup\n"
-            "  - github\n"
-            "dependencies:\n"
-            "  - other-skill\n"
             "---\n"
             "# My Skill\n\nDo things.\n"
         )
-        skill = Skill.from_file(p)
+        skill = Skill.from_dir(skill_dir)
         assert skill.name == "My Skill"
         assert skill.description == "A test skill"
-        assert skill.tools == ["clickup", "github"]
-        assert skill.dependencies == ["other-skill"]
-        assert skill.path == p.resolve()
+        assert skill.dir_path == skill_dir.resolve()
         assert "# My Skill" in skill.content
 
-    def test_from_file_without_frontmatter(self, tmp_path: Path):
-        p = tmp_path / "plain-skill.md"
-        p.write_text("# Plain Skill\n\nJust markdown.\n")
-        skill = Skill.from_file(p)
+    def test_from_dir_without_frontmatter(self, tmp_path: Path):
+        skill_dir = tmp_path / "plain-skill"
+        skill_dir.mkdir()
+        (skill_dir / "SKILL.md").write_text("# Plain Skill\n\nJust markdown.\n")
+        skill = Skill.from_dir(skill_dir)
         assert skill.name == "plain-skill"
-        assert skill.description == ""
-        assert skill.tools == []
-        assert skill.dependencies == []
-
-    def test_from_file_empty_frontmatter(self, tmp_path: Path):
-        p = tmp_path / "empty-fm.md"
-        p.write_text("---\n---\n# Content\n")
-        skill = Skill.from_file(p)
-        assert skill.name == "empty-fm"
         assert skill.description == ""
 
 
 class TestSkillRegistry:
-    def test_loads_all_skills(self, tmp_path: Path):
-        (tmp_path / "a.md").write_text("# A\n")
-        (tmp_path / "b.md").write_text("# B\n")
+    def test_loads_directory_skills(self, tmp_path: Path):
+        for name in ["alpha", "beta"]:
+            d = tmp_path / name
+            d.mkdir()
+            (d / "SKILL.md").write_text(f"---\nname: {name}\n---\n# {name}\n")
         reg = SkillRegistry(tmp_path)
-        assert set(reg.names()) == {"a", "b"}
+        assert set(reg.names()) == {"alpha", "beta"}
 
     def test_user_dir_overrides_default(self, tmp_path: Path):
         default_dir = tmp_path / "default"
         user_dir = tmp_path / "user"
         default_dir.mkdir()
         user_dir.mkdir()
-        (default_dir / "shared.md").write_text(
-            "---\ndescription: default version\n---\n# Shared\n"
-        )
-        (user_dir / "shared.md").write_text(
-            "---\ndescription: user version\n---\n# Shared\n"
-        )
+        d = default_dir / "shared"
+        d.mkdir()
+        (d / "SKILL.md").write_text("---\ndescription: default version\n---\n# Shared\n")
+        u = user_dir / "shared"
+        u.mkdir()
+        (u / "SKILL.md").write_text("---\ndescription: user version\n---\n# Shared\n")
         reg = SkillRegistry(default_dir, user_dir)
         skill = reg.get("shared")
         assert skill is not None
@@ -77,74 +67,114 @@ class TestSkillRegistry:
         reg = SkillRegistry(Path("/nonexistent/dir"))
         assert reg.all() == []
 
+    def test_ignores_dirs_without_skill_md(self, tmp_path: Path):
+        (tmp_path / "not-a-skill").mkdir()
+        reg = SkillRegistry(tmp_path)
+        assert reg.all() == []
+
+
+class TestMessage:
+    def test_create(self):
+        msg = Message.create(channel="tasks", payload={"task": "test"}, source="triage")
+        assert msg.channel == "tasks"
+        assert msg.payload == {"task": "test"}
+        assert msg.source == "triage"
+        assert msg.status == "pending"
+        assert len(msg.id) == 36
+
 
 class TestRoutine:
     def test_from_file(self, tmp_path: Path):
-        p = tmp_path / "grooming.yaml"
+        p = tmp_path / "triage.yaml"
         p.write_text(
-            "name: grooming\n"
-            "prompt_path: prompts/grooming.md\n"
-            "skills:\n"
-            "  - task-management\n"
-            "  - knowledge-management\n"
-            "subscribe:\n"
-            "  - task_queued\n"
-            "  - goal_created\n"
-            "emit:\n"
-            "  - task_groomed\n"
-            "persistent: true\n"
-            "session_key: grooming-main\n"
-            "working_directory: /tmp/work\n"
+            "name: triage\n"
+            "adapter_instance: triage-agent\n"
+            "listen:\n"
+            "  - goals\n"
+            "  - feedback\n"
+            "publish:\n"
+            "  - tasks\n"
+            "  - plans\n"
         )
         r = Routine.from_file(p)
-        assert r.name == "grooming"
-        assert r.prompt_path == "prompts/grooming.md"
-        assert r.skills == ["task-management", "knowledge-management"]
-        assert r.subscribe == ["task_queued", "goal_created"]
-        assert r.emit == ["task_groomed"]
-        assert r.persistent is True
-        assert r.session_key == "grooming-main"
-        assert r.working_directory == "/tmp/work"
+        assert r.name == "triage"
+        assert r.adapter_instance == "triage-agent"
+        assert r.listen == ["goals", "feedback"]
+        assert r.publish == ["tasks", "plans"]
 
     def test_from_file_minimal(self, tmp_path: Path):
         p = tmp_path / "simple.yaml"
-        p.write_text("prompt_path: prompts/simple.md\n")
+        p.write_text("name: simple\nadapter_instance: basic\n")
         r = Routine.from_file(p)
         assert r.name == "simple"
-        assert r.skills == []
-        assert r.subscribe == []
-        assert r.persistent is False
+        assert r.listen == []
+        assert r.publish == []
 
 
 class TestRoutineRegistry:
+    def _make_registry(self, tmp_path: Path) -> RoutineRegistry:
+        (tmp_path / "a.yaml").write_text(
+            "name: a\nadapter_instance: x\nlisten: [ch1, ch2]\n"
+        )
+        (tmp_path / "b.yaml").write_text(
+            "name: b\nadapter_instance: y\nlisten: [ch2, ch3]\n"
+        )
+        return RoutineRegistry(tmp_path)
+
     def test_loads_routines(self, tmp_path: Path):
-        (tmp_path / "a.yaml").write_text("prompt_path: a.md\nsubscribe: [ev_a]\n")
-        (tmp_path / "b.yml").write_text("prompt_path: b.md\nsubscribe: [ev_b]\n")
-        reg = RoutineRegistry(tmp_path)
+        reg = self._make_registry(tmp_path)
         assert len(reg.all()) == 2
 
-    def test_for_event_type(self, tmp_path: Path):
-        (tmp_path / "a.yaml").write_text("prompt_path: a.md\nsubscribe: [ev_a, ev_shared]\n")
-        (tmp_path / "b.yaml").write_text("prompt_path: b.md\nsubscribe: [ev_b, ev_shared]\n")
-        reg = RoutineRegistry(tmp_path)
-        assert len(reg.for_event_type("ev_shared")) == 2
-        assert len(reg.for_event_type("ev_a")) == 1
-        assert len(reg.for_event_type("ev_none")) == 0
+    def test_for_channel(self, tmp_path: Path):
+        reg = self._make_registry(tmp_path)
+        assert len(reg.for_channel("ch1")) == 1
+        assert len(reg.for_channel("ch2")) == 2
+        assert len(reg.for_channel("ch3")) == 1
 
-    def test_subscribed_event_types(self, tmp_path: Path):
-        (tmp_path / "a.yaml").write_text("prompt_path: a.md\nsubscribe: [x, y]\n")
-        (tmp_path / "b.yaml").write_text("prompt_path: b.md\nsubscribe: [y, z]\n")
-        reg = RoutineRegistry(tmp_path)
-        assert reg.subscribed_event_types() == ["x", "y", "z"]
+    def test_subscribed_channels(self, tmp_path: Path):
+        reg = self._make_registry(tmp_path)
+        assert sorted(reg.subscribed_channels()) == ["ch1", "ch2", "ch3"]
 
     def test_user_dir_overrides_default(self, tmp_path: Path):
-        default_dir = tmp_path / "default"
-        user_dir = tmp_path / "user"
-        default_dir.mkdir()
-        user_dir.mkdir()
-        (default_dir / "shared.yaml").write_text("prompt_path: default.md\n")
-        (user_dir / "shared.yaml").write_text("prompt_path: user.md\n")
-        reg = RoutineRegistry(default_dir, user_dir)
-        r = reg.get("shared")
-        assert r is not None
-        assert r.prompt_path == "user.md"
+        d = tmp_path / "default"
+        u = tmp_path / "user"
+        d.mkdir()
+        u.mkdir()
+        (d / "shared.yaml").write_text("name: shared\nadapter_instance: a\nlisten: [x]\n")
+        (u / "shared.yaml").write_text("name: shared\nadapter_instance: b\nlisten: [y]\n")
+        reg = RoutineRegistry(d, u)
+        assert reg.get("shared").adapter_instance == "b"
+
+
+class TestAdapterInstance:
+    def test_from_file(self, tmp_path: Path):
+        p = tmp_path / "triage.yaml"
+        p.write_text(
+            "name: triage\n"
+            "adapter_type: claude-code\n"
+            "config:\n"
+            "  model: haiku\n"
+            "  skills: [cambium-api]\n"
+        )
+        inst = AdapterInstance.from_file(p)
+        assert inst.name == "triage"
+        assert inst.adapter_type == "claude-code"
+        assert inst.config["model"] == "haiku"
+        assert inst.config["skills"] == ["cambium-api"]
+
+    def test_from_file_minimal(self, tmp_path: Path):
+        p = tmp_path / "basic.yaml"
+        p.write_text("name: basic\nadapter_type: claude-code\n")
+        inst = AdapterInstance.from_file(p)
+        assert inst.name == "basic"
+        assert inst.config == {}
+
+
+class TestAdapterInstanceRegistry:
+    def test_loads_instances(self, tmp_path: Path):
+        (tmp_path / "a.yaml").write_text("name: a\nadapter_type: claude-code\n")
+        (tmp_path / "b.yaml").write_text("name: b\nadapter_type: claude-code\n")
+        reg = AdapterInstanceRegistry(tmp_path)
+        assert len(reg.all()) == 2
+        assert reg.get("a") is not None
+        assert reg.get("missing") is None

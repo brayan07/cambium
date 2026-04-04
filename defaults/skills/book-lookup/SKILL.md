@@ -14,8 +14,7 @@ You retrieve knowledge from digested books stored in `vault/library/`.
 
 - A task or conversation references a book concept, author, or theme
 - You need to ground advice in a specific book's argument
-- The `digest-book` skill needs cross-references during ingestion
-- Any skill or prompt asks for book knowledge on a topic
+- Any prompt asks for book knowledge on a topic
 
 ## Progressive Disclosure Protocol
 
@@ -95,6 +94,6 @@ Retrieved from: _index.md → _book.md → chapters/03-chapter-name.md (3 levels
 
 ## What This Skill Does NOT Do
 
-- **Ingest books** — that is the `digest-book` skill's job
+- **Ingest books** — retrieval only
 - **Create or modify library files** — retrieval only
 - **Search outside the vault** — only reads from `vault/library/`

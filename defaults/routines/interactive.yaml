@@ -1,6 +1,4 @@
 name: interactive
-prompt_path: prompts/interactive.md
-skills: [cambium-api]
-subscribe: [user_session_start]
-emit: [goal_created, feedback_received]
-persistent: false
+adapter_instance: interactive
+listen: [sessions]
+publish: [goals, feedback]

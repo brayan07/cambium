@@ -242,9 +242,8 @@ replace it with the new row.
 ### Step 6: Cross-Reference Existing Books
 
 If `vault/library/_index.md` lists other books besides the one being ingested,
-use the `book-lookup` skill (if available) or manually read those books'
-`_book.md` files to identify thematic connections. Add relevant cross-references
-to the new book's `_book.md` and chapter digests.
+read those books' `_book.md` files to identify thematic connections. Add
+relevant cross-references to the new book's `_book.md` and chapter digests.
 
 If no other books exist in the library yet, skip this step.
 

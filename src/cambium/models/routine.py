@@ -1,4 +1,8 @@
-"""Routine data model and registry."""
+"""Routine data model and registry.
+
+A routine binds channel subscriptions to an adapter instance.
+It defines the event wiring — what to listen for and what it's allowed to publish.
+"""
 
 from __future__ import annotations
 
@@ -10,30 +14,21 @@ import yaml
 
 @dataclass
 class Routine:
-    """A routine is a YAML-defined event handler that binds skills to event types."""
+    """A routine is a YAML-defined channel handler that references an adapter instance."""
 
     name: str
-    prompt_path: str
-    skills: list[str] = field(default_factory=list)
-    subscribe: list[str] = field(default_factory=list)
-    emit: list[str] = field(default_factory=list)
-    persistent: bool = False
-    session_key: str | None = None
-    working_directory: str | None = None
+    adapter_instance: str
+    listen: list[str] = field(default_factory=list)
+    publish: list[str] = field(default_factory=list)
 
     @classmethod
     def from_file(cls, path: Path) -> Routine:
-        """Parse a routine from a YAML file."""
         data = yaml.safe_load(path.read_text()) or {}
         return cls(
             name=data.get("name", path.stem),
-            prompt_path=data.get("prompt_path", ""),
-            skills=data.get("skills", []),
-            subscribe=data.get("subscribe", []),
-            emit=data.get("emit", []),
-            persistent=data.get("persistent", False),
-            session_key=data.get("session_key"),
-            working_directory=data.get("working_directory"),
+            adapter_instance=data.get("adapter_instance", ""),
+            listen=data.get("listen", []),
+            publish=data.get("publish", []),
         )
 
 
@@ -49,20 +44,18 @@ class RoutineRegistry:
                     self._routines[routine.name] = routine
 
     def get(self, name: str) -> Routine | None:
-        """Get a routine by name."""
         return self._routines.get(name)
 
     def all(self) -> list[Routine]:
-        """Return all loaded routines."""
         return list(self._routines.values())
 
-    def for_event_type(self, event_type: str) -> list[Routine]:
-        """Return all routines that subscribe to a given event type."""
-        return [r for r in self._routines.values() if event_type in r.subscribe]
+    def for_channel(self, channel: str) -> list[Routine]:
+        """Return all routines listening on a given channel."""
+        return [r for r in self._routines.values() if channel in r.listen]
 
-    def subscribed_event_types(self) -> list[str]:
-        """Return all event types that at least one routine subscribes to."""
-        types: set[str] = set()
+    def subscribed_channels(self) -> list[str]:
+        """Return all channels that at least one routine listens on."""
+        channels: set[str] = set()
         for r in self._routines.values():
-            types.update(r.subscribe)
-        return sorted(types)
+            channels.update(r.listen)
+        return sorted(channels)

@@ -1,120 +1,128 @@
-"""Tests for the skill runner."""
+"""Tests for the routine runner."""
 
 from pathlib import Path
 
-import pytest
-
-from cambium.models.event import Event
+from cambium.adapters.base import AdapterInstance, AdapterInstanceRegistry, AdapterType, RunResult
+from cambium.models.message import Message
 from cambium.models.routine import Routine
-from cambium.models.skill import SkillRegistry
-from cambium.runner.skill_runner import SkillRunner
+from cambium.runner.routine_runner import RoutineRunner
 
 
-class TestSkillRunner:
-    def _setup(self, tmp_path: Path) -> tuple[SkillRegistry, Path]:
-        """Create skill files and a prompt file, return registry and base dir."""
-        skills_dir = tmp_path / "skills"
-        skills_dir.mkdir()
+class FakeAdapter(AdapterType):
+    name = "fake"
 
-        (skills_dir / "task-mgmt.md").write_text(
-            "---\n"
-            "name: task-mgmt\n"
-            "description: Task management\n"
-            "tools:\n"
-            "  - clickup\n"
-            "---\n"
-            "# Task Management\n\nManage tasks.\n"
+    def __init__(self):
+        self.last_call = None
+
+    def send_message(self, instance, user_message, session_id, session_token="",
+                     api_base_url="", live=True, on_event=None):
+        self.last_call = {
+            "instance": instance,
+            "user_message": user_message,
+            "session_id": session_id,
+            "token": session_token,
+            "api_url": api_base_url,
+        }
+        return RunResult(success=True, output=f"[fake] ran {instance.name}",
+                         session_id=session_id)
+
+
+class TestRoutineRunner:
+    def _make_runner(self, tmp_path: Path) -> tuple[RoutineRunner, FakeAdapter]:
+        inst_dir = tmp_path / "instances"
+        inst_dir.mkdir()
+        (inst_dir / "triage.yaml").write_text(
+            "name: triage\n"
+            "adapter_type: fake\n"
+            "config:\n"
+            "  model: haiku\n"
         )
-        (skills_dir / "knowledge.md").write_text(
-            "---\n"
-            "name: knowledge\n"
-            "description: Knowledge base\n"
-            "tools:\n"
-            "  - vault\n"
-            "  - clickup\n"
-            "---\n"
-            "# Knowledge\n\nManage knowledge.\n"
+        adapter = FakeAdapter()
+        instance_reg = AdapterInstanceRegistry(inst_dir)
+        runner = RoutineRunner(
+            adapter_types={"fake": adapter},
+            instance_registry=instance_reg,
         )
+        return runner, adapter
 
-        prompts_dir = tmp_path / "prompts"
-        prompts_dir.mkdir()
-        (prompts_dir / "grooming.md").write_text("You are a grooming agent.\n")
+    def test_send_message_resolves_and_executes(self, tmp_path: Path):
+        runner, adapter = self._make_runner(tmp_path)
+        routine = Routine(name="triage", adapter_instance="triage", listen=["goals"])
+        msg = Message.create(channel="goals", payload={"goal": "test"}, source="test")
 
-        registry = SkillRegistry(skills_dir)
-        return registry, tmp_path
-
-    def _make_event(self) -> Event:
-        return Event.create(type="task_queued", payload={"task_id": "123"}, source="test")
-
-    def test_build_session_assembles_prompt(self, tmp_path: Path):
-        registry, base = self._setup(tmp_path)
-        runner = SkillRunner(registry)
-        routine = Routine(
-            name="grooming",
-            prompt_path="prompts/grooming.md",
-            skills=["task-mgmt", "knowledge"],
-            subscribe=["task_queued"],
-        )
-
-        config = runner.build_session(routine, self._make_event(), prompt_base_dir=base)
-        assert "You are a grooming agent." in config.prompt
-        assert "Task Management" in config.prompt
-        assert "Knowledge" in config.prompt
-        assert config.routine_name == "grooming"
-
-    def test_build_session_aggregates_tools_no_duplicates(self, tmp_path: Path):
-        registry, base = self._setup(tmp_path)
-        runner = SkillRunner(registry)
-        routine = Routine(
-            name="test",
-            prompt_path="prompts/grooming.md",
-            skills=["task-mgmt", "knowledge"],
-            subscribe=[],
-        )
-
-        config = runner.build_session(routine, self._make_event(), prompt_base_dir=base)
-        # clickup appears in both skills but should only appear once
-        assert config.tools == ["clickup", "vault"]
-
-    def test_build_session_missing_skill_raises(self, tmp_path: Path):
-        registry, base = self._setup(tmp_path)
-        runner = SkillRunner(registry)
-        routine = Routine(
-            name="test",
-            prompt_path="",
-            skills=["nonexistent"],
-            subscribe=[],
-        )
-
-        with pytest.raises(ValueError, match="Missing skills: nonexistent"):
-            runner.build_session(routine, self._make_event(), prompt_base_dir=base)
-
-    def test_build_session_no_skills(self, tmp_path: Path):
-        _, base = self._setup(tmp_path)
-        runner = SkillRunner(SkillRegistry(base / "skills"))
-        routine = Routine(
-            name="simple",
-            prompt_path="prompts/grooming.md",
-            skills=[],
-            subscribe=[],
-        )
-
-        config = runner.build_session(routine, self._make_event(), prompt_base_dir=base)
-        assert "You are a grooming agent." in config.prompt
-        assert config.tools == []
-
-    def test_execute_returns_mock_result(self, tmp_path: Path):
-        registry, base = self._setup(tmp_path)
-        runner = SkillRunner(registry)
-        routine = Routine(
-            name="test",
-            prompt_path="prompts/grooming.md",
-            skills=["task-mgmt"],
-            subscribe=[],
-        )
-
-        config = runner.build_session(routine, self._make_event(), prompt_base_dir=base)
-        result = runner.execute(config, live=False)
+        result = runner.send_message(routine, msg)
         assert result.success is True
-        assert "mock" in result.output
-        assert result.events_emitted == []
+        assert adapter.last_call is not None
+        assert adapter.last_call["instance"].name == "triage"
+        assert len(adapter.last_call["token"]) > 0
+        assert len(adapter.last_call["session_id"]) == 36  # UUID
+
+    def test_missing_instance_returns_error(self, tmp_path: Path):
+        runner, _ = self._make_runner(tmp_path)
+        routine = Routine(name="test", adapter_instance="nonexistent", listen=[])
+        msg = Message.create(channel="x", payload={}, source="test")
+
+        result = runner.send_message(routine, msg)
+        assert result.success is False
+        assert "not found" in result.error
+
+    def test_missing_adapter_type_returns_error(self, tmp_path: Path):
+        inst_dir = tmp_path / "instances"
+        inst_dir.mkdir()
+        (inst_dir / "bad.yaml").write_text("name: bad\nadapter_type: nonexistent\n")
+
+        instance_reg = AdapterInstanceRegistry(inst_dir)
+        runner = RoutineRunner(adapter_types={}, instance_registry=instance_reg)
+        routine = Routine(name="test", adapter_instance="bad", listen=[])
+        msg = Message.create(channel="x", payload={}, source="test")
+
+        result = runner.send_message(routine, msg)
+        assert result.success is False
+        assert "not found" in result.error
+
+    def test_session_token_contains_routine_name(self, tmp_path: Path):
+        import jwt as pyjwt
+        from cambium.server.auth import _SIGNING_KEY
+
+        runner, adapter = self._make_runner(tmp_path)
+        routine = Routine(name="my-routine", adapter_instance="triage", listen=[])
+        msg = Message.create(channel="x", payload={}, source="test")
+
+        runner.send_message(routine, msg)
+        token = adapter.last_call["token"]
+        claims = pyjwt.decode(token, _SIGNING_KEY, algorithms=["HS256"])
+        assert claims["routine"] == "my-routine"
+        assert "session" in claims
+
+    def test_session_persisted_when_store_provided(self, tmp_path: Path):
+        from cambium.session.store import SessionStore
+
+        runner, adapter = self._make_runner(tmp_path)
+        runner.session_store = SessionStore()
+
+        routine = Routine(name="triage", adapter_instance="triage", listen=["goals"])
+        msg = Message.create(channel="goals", payload={"goal": "test"}, source="test")
+
+        result = runner.send_message(routine, msg)
+        assert result.success is True
+
+        # Session should exist in store
+        session = runner.session_store.get_session(result.session_id)
+        assert session is not None
+        assert session.routine_name == "triage"
+        assert session.status.value == "completed"
+
+        # Messages should be stored
+        messages = runner.session_store.get_messages(result.session_id)
+        assert len(messages) == 2  # user + assistant
+        assert messages[0].role == "user"
+        assert messages[1].role == "assistant"
+
+    def test_resume_session_with_existing_id(self, tmp_path: Path):
+        runner, adapter = self._make_runner(tmp_path)
+        routine = Routine(name="triage", adapter_instance="triage", listen=["goals"])
+        msg = Message.create(channel="goals", payload={"goal": "test"}, source="test")
+
+        result = runner.send_message(routine, msg, session_id="existing-session-id")
+        assert result.success is True
+        assert adapter.last_call["session_id"] == "existing-session-id"

@@ -1,6 +1,4 @@
 name: triage
-prompt_path: prompts/triage.md
-skills: [cambium-api]
-subscribe: [goal_created, feedback_received, schedule_daily]
-emit: [goal_needs_plan, task_queued, reflection_needed]
-persistent: false
+adapter_instance: triage
+listen: [goals, feedback, schedule]
+publish: [plans, tasks, reflections]

@@ -1,0 +1,346 @@
+"""Claude Code adapter type.
+
+Translates adapter instance config into `claude -p` CLI execution.
+Manages the Claude Code capability library (skills, sub-agents).
+Translates stream-json output into OpenAI chat.completion.chunk format.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import os
+import shutil
+import subprocess
+import tempfile
+import time
+from pathlib import Path
+from typing import Any, Callable
+
+from cambium.adapters.base import AdapterInstance, AdapterType, RunResult
+from cambium.models.skill import SkillRegistry
+
+log = logging.getLogger(__name__)
+
+
+class ClaudeCodeAdapter(AdapterType):
+    """Adapter type for Claude Code CLI."""
+
+    name = "claude-code"
+
+    def __init__(self, skill_registry: SkillRegistry, framework_dir: Path | None = None) -> None:
+        self.skill_registry = skill_registry
+        self.framework_dir = framework_dir
+        # Track which sessions have been started (for --resume logic)
+        self._active_sessions: set[str] = set()
+
+    def send_message(
+        self,
+        instance: AdapterInstance,
+        user_message: str,
+        session_id: str,
+        session_token: str = "",
+        api_base_url: str = "",
+        live: bool = True,
+        on_event: Callable[[dict[str, Any]], None] | None = None,
+    ) -> RunResult:
+        if not live:
+            return self._mock_send(instance, user_message, session_id, on_event)
+        return self._live_send(
+            instance, user_message, session_id, session_token, api_base_url, on_event
+        )
+
+    def _mock_send(
+        self,
+        instance: AdapterInstance,
+        user_message: str,
+        session_id: str,
+        on_event: Callable[[dict[str, Any]], None] | None = None,
+    ) -> RunResult:
+        text = f"[mock] {instance.name}: {user_message[:80]}"
+        if on_event:
+            on_event(_make_text_chunk(session_id, instance.config.get("model", "mock"), text))
+            on_event(_make_done_chunk(session_id, instance.config.get("model", "mock")))
+        return RunResult(success=True, output=text, duration_seconds=0.0, session_id=session_id)
+
+    def _live_send(
+        self,
+        instance: AdapterInstance,
+        user_message: str,
+        session_id: str,
+        session_token: str,
+        api_base_url: str,
+        on_event: Callable[[dict[str, Any]], None] | None = None,
+    ) -> RunResult:
+        start = time.monotonic()
+        tmp_dir = None
+        config = instance.config
+
+        try:
+            skill_names = config.get("skills", [])
+            tmp_dir = self._build_skills_dir(skill_names)
+
+            system_prompt = self._load_system_prompt(config)
+            prompt_file = Path(tmp_dir) / "system-prompt.md"
+            prompt_file.write_text(system_prompt)
+
+            model = config.get("model", "opus")
+            timeout = config.get("timeout", 1200)
+            is_resume = session_id in self._active_sessions
+
+            cmd = [
+                "claude",
+                "--print", "-",
+                "--output-format", "stream-json",
+                "--verbose",
+                "--model", model,
+                "--dangerously-skip-permissions",
+                "--add-dir", tmp_dir,
+                "--append-system-prompt-file", str(prompt_file),
+            ]
+
+            if is_resume:
+                cmd.extend(["--resume", session_id])
+            else:
+                cmd.extend(["--session-id", session_id])
+
+            env = os.environ.copy()
+            env["CAMBIUM_TOKEN"] = session_token
+            env["CAMBIUM_API_URL"] = api_base_url
+
+            log.info(
+                f"{'Resuming' if is_resume else 'Starting'} session '{session_id[:8]}' "
+                f"instance='{instance.name}' model={model} skills={len(skill_names)}"
+            )
+
+            proc = subprocess.Popen(
+                cmd,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                env=env,
+            )
+
+            assert proc.stdin is not None
+            proc.stdin.write(user_message)
+            proc.stdin.close()
+
+            last_text = ""
+            chunk_id = f"chatcmpl-{session_id[:12]}"
+
+            assert proc.stdout is not None
+            for line in proc.stdout:
+                line = line.rstrip("\n")
+                parsed = _parse_stream_line(line)
+                if not parsed:
+                    continue
+
+                # Extract session_id from init event
+                if parsed.get("type") == "system" and parsed.get("subtype") == "init":
+                    self._active_sessions.add(session_id)
+
+                # Translate to OpenAI chunks and emit
+                chunks = _stream_json_to_openai(parsed, chunk_id, model)
+                for chunk in chunks:
+                    if on_event:
+                        on_event(chunk)
+
+                # Track final text for RunResult
+                if parsed.get("type") == "result":
+                    last_text = parsed.get("result", last_text)
+                elif parsed.get("type") == "assistant" and "message" in parsed:
+                    for block in parsed["message"].get("content", []):
+                        if isinstance(block, dict) and block.get("type") == "text":
+                            last_text = block.get("text", last_text)
+
+            try:
+                proc.wait(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait()
+                if on_event:
+                    on_event(_make_done_chunk(chunk_id, model))
+                return RunResult(
+                    success=False,
+                    output=last_text,
+                    duration_seconds=time.monotonic() - start,
+                    error=f"Timed out after {timeout}s",
+                    session_id=session_id,
+                )
+
+            duration = time.monotonic() - start
+            stderr_text = proc.stderr.read() if proc.stderr else ""
+
+            # Emit done chunk
+            if on_event:
+                on_event(_make_done_chunk(chunk_id, model))
+
+            if proc.returncode == 0:
+                self._active_sessions.add(session_id)
+                return RunResult(
+                    success=True,
+                    output=last_text,
+                    duration_seconds=duration,
+                    session_id=session_id,
+                )
+            else:
+                return RunResult(
+                    success=False,
+                    output=last_text,
+                    duration_seconds=duration,
+                    error=stderr_text[:500] if stderr_text else f"Exit code {proc.returncode}",
+                    session_id=session_id,
+                )
+
+        except FileNotFoundError:
+            return RunResult(
+                success=False,
+                output="",
+                duration_seconds=time.monotonic() - start,
+                error="claude CLI not found — is it installed and on PATH?",
+            )
+        finally:
+            if tmp_dir and os.path.exists(tmp_dir):
+                shutil.rmtree(tmp_dir, ignore_errors=True)
+
+    def _build_skills_dir(self, skill_names: list[str]) -> str:
+        """Create ephemeral directory with .claude/skills/ symlinks."""
+        tmp_dir = tempfile.mkdtemp(prefix="cambium-skills-")
+        skills_target = Path(tmp_dir) / ".claude" / "skills"
+        skills_target.mkdir(parents=True)
+
+        for name in skill_names:
+            skill = self.skill_registry.get(name)
+            if skill is None:
+                continue
+            (skills_target / name).symlink_to(skill.dir_path)
+
+        return tmp_dir
+
+    def _load_system_prompt(self, config: dict) -> str:
+        """Load system prompt from the path specified in config.
+
+        Paths are resolved relative to framework_dir if not absolute.
+        """
+        prompt_path = config.get("system_prompt_path", "")
+        if not prompt_path:
+            return ""
+        path = Path(prompt_path)
+        if not path.is_absolute() and self.framework_dir:
+            path = self.framework_dir / path
+        if path.exists():
+            return path.read_text()
+        return ""
+
+
+# --- Stream-JSON to OpenAI translation ---
+
+
+def _parse_stream_line(line: str) -> dict | None:
+    """Parse a single line of stream-json output."""
+    line = line.strip()
+    if not line:
+        return None
+    try:
+        return json.loads(line)
+    except json.JSONDecodeError:
+        return None
+
+
+def _make_text_chunk(chunk_id: str, model: str, text: str) -> dict[str, Any]:
+    return {
+        "id": chunk_id,
+        "object": "chat.completion.chunk",
+        "created": int(time.time()),
+        "model": model,
+        "choices": [{"index": 0, "delta": {"content": text}, "finish_reason": None}],
+    }
+
+
+def _make_done_chunk(chunk_id: str, model: str) -> dict[str, Any]:
+    return {
+        "id": chunk_id,
+        "object": "chat.completion.chunk",
+        "created": int(time.time()),
+        "model": model,
+        "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+    }
+
+
+def _stream_json_to_openai(
+    event: dict, chunk_id: str, model: str
+) -> list[dict[str, Any]]:
+    """Translate a Claude Code stream-json event to OpenAI chunk(s).
+
+    Returns a list because some events map to zero or multiple chunks.
+    """
+    chunks: list[dict[str, Any]] = []
+    event_type = event.get("type")
+
+    if event_type == "assistant" and "message" in event:
+        for block in event["message"].get("content", []):
+            if not isinstance(block, dict):
+                continue
+            block_type = block.get("type")
+
+            if block_type == "text":
+                text = block.get("text", "")
+                if text:
+                    chunks.append(_make_text_chunk(chunk_id, model, text))
+
+            elif block_type == "thinking":
+                text = block.get("thinking", "")
+                if text:
+                    chunk = _make_text_chunk(chunk_id, model, text)
+                    chunk["choices"][0]["thinking"] = True
+                    chunks.append(chunk)
+
+            elif block_type == "tool_use":
+                tool_chunk: dict[str, Any] = {
+                    "id": chunk_id,
+                    "object": "chat.completion.chunk",
+                    "created": int(time.time()),
+                    "model": model,
+                    "choices": [
+                        {
+                            "index": 0,
+                            "delta": {
+                                "tool_calls": [
+                                    {
+                                        "index": 0,
+                                        "id": block.get("id", ""),
+                                        "type": "function",
+                                        "function": {
+                                            "name": block.get("name", ""),
+                                            "arguments": json.dumps(
+                                                block.get("input", {})
+                                            ),
+                                        },
+                                    }
+                                ]
+                            },
+                            "finish_reason": None,
+                        }
+                    ],
+                }
+                chunks.append(tool_chunk)
+
+            elif block_type == "tool_result":
+                result_chunk: dict[str, Any] = {
+                    "id": chunk_id,
+                    "object": "chat.completion.chunk",
+                    "created": int(time.time()),
+                    "model": model,
+                    "choices": [{"index": 0, "delta": {}, "finish_reason": None}],
+                    "tool_result": {
+                        "tool_call_id": block.get("tool_use_id", ""),
+                        "content": block.get("content", ""),
+                    },
+                }
+                chunks.append(result_chunk)
+
+    # result events are NOT translated to chunks — they duplicate the
+    # final assistant text. They're only used for RunResult.output.
+
+    return chunks

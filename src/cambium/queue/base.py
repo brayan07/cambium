@@ -4,33 +4,33 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 
-from cambium.models.event import Event
+from cambium.models.message import Message
 
 
 class QueueAdapter(ABC):
-    """Abstract base class for event queue adapters."""
+    """Abstract base class for channel-based message queues."""
 
     @abstractmethod
-    def enqueue(self, event: Event) -> None:
-        """Add an event to the queue."""
+    def publish(self, message: Message) -> None:
+        """Publish a message to its channel."""
         ...
 
     @abstractmethod
-    def dequeue(self, event_types: list[str], limit: int = 1) -> list[Event]:
-        """Claim up to `limit` pending events matching the given types."""
+    def consume(self, channels: list[str], limit: int = 1) -> list[Message]:
+        """Claim up to `limit` pending messages from the given channels."""
         ...
 
     @abstractmethod
-    def ack(self, event_id: str) -> None:
-        """Mark an event as successfully processed."""
+    def ack(self, message_id: str) -> None:
+        """Mark a message as successfully processed."""
         ...
 
     @abstractmethod
-    def nack(self, event_id: str) -> None:
-        """Return an event to the queue for retry."""
+    def nack(self, message_id: str) -> None:
+        """Return a message to the queue for retry."""
         ...
 
     @abstractmethod
-    def pending_count(self, event_types: list[str] | None = None) -> int:
-        """Count pending events, optionally filtered by type."""
+    def pending_count(self, channels: list[str] | None = None) -> int:
+        """Count pending messages, optionally filtered by channel."""
         ...
