@@ -120,8 +120,30 @@ def _setup_github(root: Path, repo_name: str) -> None:
         return  # remote already configured
 
     subprocess.run(
-        ["gh", "repo", "create", repo_name, "--private", "--source=.", "--remote=origin", "--push"],
+        ["gh", "repo", "create", repo_name, "--private", "--source=.", "--remote=origin"],
         cwd=root, check=True,
+    )
+
+    # gh sets an HTTPS remote by default. If the user's git protocol is SSH,
+    # rewrite the remote so pushes work without a credential helper.
+    proto_result = subprocess.run(
+        ["gh", "auth", "status"], capture_output=True, text=True,
+    )
+    if "ssh" in (proto_result.stdout + proto_result.stderr):
+        user_result = subprocess.run(
+            ["gh", "api", "user", "--jq", ".login"], capture_output=True, text=True,
+        )
+        gh_user = user_result.stdout.strip()
+        if gh_user:
+            subprocess.run(
+                ["git", "remote", "set-url", "origin", f"git@github.com:{gh_user}/{repo_name}.git"],
+                cwd=root, capture_output=True,
+            )
+
+    # Push initial commit (best-effort — don't fail init if push fails)
+    subprocess.run(
+        ["git", "push", "-u", "origin", "main"],
+        cwd=root, capture_output=True,
     )
 
 
