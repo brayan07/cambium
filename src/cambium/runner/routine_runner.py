@@ -36,15 +36,19 @@ class RoutineRunner:
     def send_message(
         self,
         routine: Routine,
-        message: Message,
+        message: Message | None = None,
         session_id: str | None = None,
+        user_message: str | None = None,
         live: bool = True,
         on_event: Callable[[dict[str, Any]], None] | None = None,
     ) -> RunResult:
         """Execute a routine for a given message.
 
-        If session_id is provided, resumes that session. Otherwise creates
-        a new one-shot session.
+        For one-shot sessions (consumer loop): pass ``message`` and omit
+        ``session_id`` — the runner creates a session automatically.
+
+        For interactive sessions (API endpoint): pass ``session_id`` and
+        ``user_message`` — the runner reuses the existing session.
         """
         # Resolve adapter instance
         instance = self.instance_registry.get(routine.adapter_instance)
@@ -74,17 +78,24 @@ class RoutineRunner:
                 session_type=SessionType.ONE_SHOT,
                 routine_name=routine.name,
                 adapter_instance_name=routine.adapter_instance,
-                metadata={"trigger_channel": message.channel, "trigger_message_id": message.id},
+                metadata={"trigger_channel": message.channel, "trigger_message_id": message.id} if message else {},
             )
             session.id = session_id
             session.status = SessionStatus.ACTIVE
             self.session_store.create_session(session)
+        elif self.session_store and not is_new_session:
+            # Interactive session: activate if still in CREATED status
+            existing = self.session_store.get_session(session_id)
+            if existing and existing.status == SessionStatus.CREATED:
+                self.session_store.update_status(session_id, SessionStatus.ACTIVE)
 
         # Issue session token
         token = create_session_token(routine.name, session_id)
 
-        # Build user message from payload
-        user_message = json.dumps(message.payload, indent=2) if message.payload else message.channel
+        # Determine the user message text
+        if user_message is None:
+            # One-shot: build from Message payload
+            user_message = json.dumps(message.payload, indent=2) if (message and message.payload) else (message.channel if message else "")
 
         # Store the user message
         if self.session_store:

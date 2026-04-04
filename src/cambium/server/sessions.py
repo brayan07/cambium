@@ -11,7 +11,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from cambium.session.model import Session, SessionMessage, SessionStatus, SessionType
+from cambium.session.model import Session, SessionStatus, SessionType
 
 log = logging.getLogger(__name__)
 
@@ -123,49 +123,23 @@ async def send_message(session_id: str, body: SendMessageRequest):
         raise HTTPException(status_code=400, detail="No user message provided")
     user_content = user_messages[-1].get("content", "")
 
-    # Mark session as active
-    if session.status == SessionStatus.CREATED:
-        store.update_status(session_id, SessionStatus.ACTIVE)
-
-    # Store the user message
-    seq = store.next_sequence(session_id)
-    store.add_message(SessionMessage.create(session_id, "user", user_content, sequence=seq))
-
     # Create broadcaster for this invocation
     broadcaster = broadcaster_reg.create(session_id)
 
-    # Run adapter in background thread
-    from cambium.models.message import Message
-    from cambium.server.auth import create_session_token
-
-    token = create_session_token(routine.name, session_id)
-
+    # Run adapter via the runner in a background thread
     async def run_adapter():
         loop = asyncio.get_event_loop()
         try:
             result = await loop.run_in_executor(
                 None,
-                lambda: runner.adapter_types[
-                    runner.instance_registry.get(routine.adapter_instance).adapter_type
-                ].send_message(
-                    instance=runner.instance_registry.get(routine.adapter_instance),
-                    user_message=user_content,
+                lambda: runner.send_message(
+                    routine=routine,
                     session_id=session_id,
-                    session_token=token,
-                    api_base_url=runner.api_base_url,
+                    user_message=user_content,
                     live=True,
                     on_event=lambda chunk: broadcaster.publish(chunk),
                 ),
             )
-            # Store assistant response
-            if result.output:
-                seq = store.next_sequence(session_id)
-                store.add_message(
-                    SessionMessage.create(
-                        session_id, "assistant", result.output, sequence=seq,
-                        metadata={"duration_seconds": result.duration_seconds},
-                    )
-                )
             if not result.success:
                 log.error(f"Session {session_id[:8]} failed: {result.error}")
         except Exception:
