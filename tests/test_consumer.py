@@ -10,6 +10,7 @@ from cambium.models.message import Message
 from cambium.models.routine import RoutineRegistry
 from cambium.queue.sqlite import SQLiteQueue
 from cambium.runner.routine_runner import RoutineRunner
+from cambium.session.broadcaster import BroadcasterRegistry
 
 
 class FakeAdapter(AdapterType):
@@ -22,6 +23,8 @@ class FakeAdapter(AdapterType):
 
     def send_message(self, instance, user_message, session_id, session_token="",
                      api_base_url="", live=True, on_event=None):
+        if on_event:
+            on_event({"type": "chunk", "text": "hello"})
         return RunResult(
             success=self._result.success,
             output=self._result.output,
@@ -120,3 +123,33 @@ class TestConsumerLoop:
         assert len(results) == 1
         assert results[0].success is False
         assert "not found" in results[0].error
+
+    def test_broadcaster_receives_chunks(self, tmp_path: Path):
+        """One-shot executions stream chunks through a broadcaster."""
+        broadcaster_reg = BroadcasterRegistry()
+        loop, queue = _make_loop(tmp_path, [
+            ("handler.yaml", "name: handler\nadapter_instance: basic\nlisten: [tasks]\n"),
+        ])
+        loop.broadcaster_registry = broadcaster_reg
+
+        queue.publish(Message.create(channel="tasks", payload={}, source="test"))
+        results = loop.tick()
+
+        assert len(results) == 1
+        assert results[0].success is True
+        # Broadcaster should have been created and cleaned up
+        assert broadcaster_reg.active_count() == 0
+
+    def test_broadcaster_closed_on_failure(self, tmp_path: Path):
+        """Broadcaster is cleaned up even when execution fails."""
+        broadcaster_reg = BroadcasterRegistry()
+        adapter = FakeAdapter(RunResult(success=False, output="", error="boom"))
+        loop, queue = _make_loop(tmp_path, [
+            ("handler.yaml", "name: handler\nadapter_instance: basic\nlisten: [tasks]\n"),
+        ], adapter=adapter)
+        loop.broadcaster_registry = broadcaster_reg
+
+        queue.publish(Message.create(channel="tasks", payload={}, source="test"))
+        loop.tick()
+
+        assert broadcaster_reg.active_count() == 0

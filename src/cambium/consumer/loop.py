@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import logging
 import time
+import uuid
 
 from cambium.adapters.base import RunResult
 from cambium.models.routine import RoutineRegistry
 from cambium.queue.base import QueueAdapter
 from cambium.runner.routine_runner import RoutineRunner
+from cambium.session.broadcaster import BroadcasterRegistry
 
 log = logging.getLogger(__name__)
 
@@ -21,12 +23,14 @@ class ConsumerLoop:
         queue: QueueAdapter,
         routine_registry: RoutineRegistry,
         routine_runner: RoutineRunner,
+        broadcaster_registry: BroadcasterRegistry | None = None,
         poll_interval: float = 2.0,
         live: bool = False,
     ) -> None:
         self.queue = queue
         self.routine_registry = routine_registry
         self.routine_runner = routine_runner
+        self.broadcaster_registry = broadcaster_registry
         self.poll_interval = poll_interval
         self.live = live
 
@@ -48,9 +52,17 @@ class ConsumerLoop:
 
             message_success = True
             for routine in routines:
+                session_id = str(uuid.uuid4())
+                broadcaster = None
+                if self.broadcaster_registry:
+                    broadcaster = self.broadcaster_registry.create(session_id)
+
                 try:
                     result = self.routine_runner.send_message(
-                        routine, message, live=self.live,
+                        routine, message,
+                        session_id=session_id,
+                        live=self.live,
+                        on_event=broadcaster.publish if broadcaster else None,
                     )
                     results.append(result)
 
@@ -62,6 +74,10 @@ class ConsumerLoop:
                         RunResult(success=False, output="", error=str(exc))
                     )
                     message_success = False
+                finally:
+                    if broadcaster:
+                        broadcaster.close()
+                        self.broadcaster_registry.remove(session_id)
 
             if message_success:
                 self.queue.ack(message.id)

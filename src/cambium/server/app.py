@@ -208,6 +208,7 @@ def build_server(
         queue=queue,
         routine_registry=routine_registry,
         routine_runner=routine_runner,
+        broadcaster_registry=broadcaster_registry,
         poll_interval=poll_interval,
         live=live,
     )
