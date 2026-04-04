@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import json
+import logging
+import subprocess
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -9,6 +12,8 @@ from pathlib import Path
 from cambium.models.event import Event
 from cambium.models.routine import Routine
 from cambium.models.skill import SkillRegistry
+
+log = logging.getLogger(__name__)
 
 
 @dataclass
@@ -91,14 +96,126 @@ class SkillRunner:
             session_key=routine.session_key,
         )
 
-    def execute(self, config: SessionConfig) -> SessionResult:
-        """Execute a session. MVP: returns a mock result."""
-        start = time.monotonic()
-        # MVP mock execution — real implementation calls claude -p
-        duration = time.monotonic() - start
+    def execute(self, config: SessionConfig, live: bool = True, timeout: int = 1200) -> SessionResult:
+        """Execute a session via claude -p.
+
+        Args:
+            config: The assembled session configuration.
+            live: If True, use real claude -p execution. If False, return mock.
+            timeout: Max seconds before killing the subprocess.
+        """
+        if not live:
+            return self._mock_execute(config)
+        return self._live_execute(config, timeout)
+
+    def _mock_execute(self, config: SessionConfig) -> SessionResult:
+        """Return a mock result for testing."""
         return SessionResult(
             success=True,
             output=f"[mock] Executed routine '{config.routine_name}' for event '{config.event.type}'",
             events_emitted=[],
-            duration_seconds=duration,
+            duration_seconds=0.0,
         )
+
+    def _live_execute(self, config: SessionConfig, timeout: int) -> SessionResult:
+        """Execute via claude -p subprocess."""
+        start = time.monotonic()
+
+        # Build the user message from event payload
+        user_msg = json.dumps(config.event.payload, indent=2) if config.event.payload else config.event.type
+
+        # Build claude command
+        cmd = [
+            "claude", "-p", user_msg,
+            "--model", "opus",
+            "--output-format", "stream-json",
+            "--verbose",
+        ]
+
+        # Add system prompt
+        if config.prompt:
+            cmd.extend(["--system-prompt", config.prompt])
+
+        # Add allowed tools
+        for tool in config.tools:
+            cmd.extend(["--allowedTools", tool])
+
+        cwd = config.working_directory or None
+
+        log.info(f"Executing routine '{config.routine_name}' for event '{config.event.type}'")
+        log.debug(f"Command: {' '.join(cmd[:6])}... ({len(config.prompt)} char prompt, {len(config.tools)} tools)")
+
+        try:
+            # Wrap with script for pseudo-TTY (same fix as async-runner)
+            wrapped_cmd = ["script", "-q", "/dev/null"] + cmd
+
+            proc = subprocess.run(
+                wrapped_cmd,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                cwd=cwd,
+            )
+
+            duration = time.monotonic() - start
+            output = proc.stdout or ""
+
+            # Parse stream-json output for the final result
+            result_text = self._extract_result(output)
+
+            if proc.returncode == 0:
+                return SessionResult(
+                    success=True,
+                    output=result_text,
+                    events_emitted=[],
+                    duration_seconds=duration,
+                )
+            else:
+                return SessionResult(
+                    success=False,
+                    output=result_text,
+                    events_emitted=[],
+                    duration_seconds=duration,
+                    error=proc.stderr[:500] if proc.stderr else f"Exit code {proc.returncode}",
+                )
+
+        except subprocess.TimeoutExpired:
+            duration = time.monotonic() - start
+            return SessionResult(
+                success=False,
+                output="",
+                events_emitted=[],
+                duration_seconds=duration,
+                error=f"Timed out after {timeout}s",
+            )
+        except FileNotFoundError:
+            duration = time.monotonic() - start
+            return SessionResult(
+                success=False,
+                output="",
+                events_emitted=[],
+                duration_seconds=duration,
+                error="claude CLI not found — is it installed and on PATH?",
+            )
+
+    @staticmethod
+    def _extract_result(stream_output: str) -> str:
+        """Extract the final assistant message from stream-json output."""
+        last_text = ""
+        for line in stream_output.strip().splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                msg = json.loads(line)
+                if msg.get("type") == "result":
+                    last_text = msg.get("result", last_text)
+                elif msg.get("type") == "assistant" and "message" in msg:
+                    # Accumulate text content
+                    content = msg["message"].get("content", [])
+                    for block in content:
+                        if isinstance(block, dict) and block.get("type") == "text":
+                            last_text = block.get("text", last_text)
+            except json.JSONDecodeError:
+                continue
+        return last_text

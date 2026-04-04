@@ -18,11 +18,13 @@ class ConsumerLoop:
         routine_registry: RoutineRegistry,
         skill_runner: SkillRunner,
         poll_interval: float = 2.0,
+        live: bool = False,
     ) -> None:
         self.queue = queue
         self.routine_registry = routine_registry
         self.skill_runner = skill_runner
         self.poll_interval = poll_interval
+        self.live = live
 
     def tick(self) -> list[SessionResult]:
         """One iteration: dequeue events, match to routines, execute, re-enqueue emitted events."""
@@ -45,7 +47,7 @@ class ConsumerLoop:
             for routine in routines:
                 try:
                     config = self.skill_runner.build_session(routine, event)
-                    result = self.skill_runner.execute(config)
+                    result = self.skill_runner.execute(config, live=self.live)
                     results.append(result)
 
                     if result.success:

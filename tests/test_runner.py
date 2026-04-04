@@ -114,7 +114,7 @@ class TestSkillRunner:
         )
 
         config = runner.build_session(routine, self._make_event(), prompt_base_dir=base)
-        result = runner.execute(config)
+        result = runner.execute(config, live=False)
         assert result.success is True
         assert "mock" in result.output
         assert result.events_emitted == []

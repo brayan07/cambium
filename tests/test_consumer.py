@@ -66,8 +66,8 @@ class TestConsumerLoop:
         follow_up = Event.create(type="follow_up", payload={}, source="handler")
         original_execute = runner.execute
 
-        def mock_execute(config):
-            result = original_execute(config)
+        def mock_execute(config, **kwargs):
+            result = original_execute(config, live=False)
             result.events_emitted = [follow_up]
             return result
 
