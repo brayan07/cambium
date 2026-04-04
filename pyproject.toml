@@ -1,0 +1,20 @@
+[project]
+name = "cambium"
+version = "0.1.0"
+description = "A skill lifecycle engine for personal AI agents"
+readme = "README.md"
+authors = [
+    { name = "Brayan Jaramillo", email = "bryn07@gmail.com" }
+]
+requires-python = ">=3.13"
+dependencies = ["pyyaml"]
+
+[dependency-groups]
+dev = ["pytest"]
+
+[build-system]
+requires = ["uv_build>=0.8.11,<0.9.0"]
+build-backend = "uv_build"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
