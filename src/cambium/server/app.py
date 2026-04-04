@@ -157,9 +157,6 @@ def build_server(
     skill_dirs = [framework_dir / "defaults" / "adapters" / "claude-code" / "skills"]
     if (user_dir / "adapters" / "claude-code" / "skills").exists():
         skill_dirs.append(user_dir / "adapters" / "claude-code" / "skills")
-    # Also check legacy locations for now
-    if (framework_dir / "defaults" / "skills").exists():
-        skill_dirs.insert(0, framework_dir / "defaults" / "skills")
     skill_registry = SkillRegistry(*skill_dirs)
 
     # Adapter instances

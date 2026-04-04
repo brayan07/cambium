@@ -1,36 +1,24 @@
-"""Tests that ported skills from Marcus parse correctly."""
+"""Tests that default skills parse correctly."""
 
 from pathlib import Path
 from cambium.models.skill import SkillRegistry
 
 
-DEFAULTS_DIR = Path(__file__).parent.parent / "defaults" / "skills"
+SKILLS_DIR = Path(__file__).parent.parent / "defaults" / "adapters" / "claude-code" / "skills"
 
 
-class TestPortedSkills:
-    def test_all_skills_parse(self) -> None:
-        registry = SkillRegistry(DEFAULTS_DIR)
-        assert len(registry._skills) >= 5
+class TestDefaultSkills:
+    def test_cambium_api_skill_parses(self) -> None:
+        registry = SkillRegistry(SKILLS_DIR)
+        assert len(registry._skills) >= 1
 
-    def test_excalidraw_has_frontmatter(self) -> None:
-        registry = SkillRegistry(DEFAULTS_DIR)
-        skill = registry.get("excalidraw-diagram")
+    def test_cambium_api_has_frontmatter(self) -> None:
+        registry = SkillRegistry(SKILLS_DIR)
+        skill = registry.get("cambium-api")
         assert skill is not None
         assert skill.description != ""
-
-    def test_skill_creator_has_frontmatter(self) -> None:
-        registry = SkillRegistry(DEFAULTS_DIR)
-        skill = registry.get("skill-creator")
-        assert skill is not None
-        assert skill.description != ""
-
-    def test_voice_is_genericized(self) -> None:
-        registry = SkillRegistry(DEFAULTS_DIR)
-        skill = registry.get("voice")
-        assert skill is not None
-        assert "echo voice at 1.15x" not in skill.content
 
     def test_all_skills_have_names(self) -> None:
-        registry = SkillRegistry(DEFAULTS_DIR)
+        registry = SkillRegistry(SKILLS_DIR)
         for name, skill in registry._skills.items():
             assert skill.name, f"Skill {name} has no name"

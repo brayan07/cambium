@@ -113,8 +113,6 @@ def _build_adapter_types(framework_dir, user_dir):
     skill_dirs = [framework_dir / "defaults" / "adapters" / "claude-code" / "skills"]
     if (user_dir / "adapters" / "claude-code" / "skills").exists():
         skill_dirs.append(user_dir / "adapters" / "claude-code" / "skills")
-    if (framework_dir / "defaults" / "skills").exists():
-        skill_dirs.insert(0, framework_dir / "defaults" / "skills")
     skill_registry = SkillRegistry(*skill_dirs)
 
     claude_adapter = ClaudeCodeAdapter(skill_registry, framework_dir=framework_dir)
