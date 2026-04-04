@@ -44,6 +44,7 @@ class RoutineRunner:
         user_message: str | None = None,
         live: bool = True,
         on_event: Callable[[dict[str, Any]], None] | None = None,
+        store_transcript: bool = True,
     ) -> RunResult:
         """Execute a routine for a given message.
 
@@ -113,6 +114,28 @@ class RoutineRunner:
             session_dir = self.user_dir / "data" / "sessions" / session_id
             session_dir.mkdir(parents=True, exist_ok=True)
 
+        # Build raw event callback for full transcript persistence
+        on_raw_event = None
+        _raw_event_count = [0]  # mutable counter shared by closure
+        if self.session_store and store_transcript:
+            _seq = [self.session_store.next_sequence(session_id)]
+
+            def on_raw_event(event: dict[str, Any]) -> None:
+                event_type = event.get("type", "")
+                role = _event_type_to_role(event_type)
+                content = _extract_event_content(event)
+                self.session_store.add_message(
+                    SessionMessage.create(
+                        session_id,
+                        role=role,
+                        content=content,
+                        sequence=_seq[0],
+                        metadata={"event_type": event_type, "raw": event},
+                    )
+                )
+                _seq[0] += 1
+                _raw_event_count[0] += 1
+
         # Execute
         result = adapter.send_message(
             instance=instance,
@@ -122,21 +145,70 @@ class RoutineRunner:
             api_base_url=self.api_base_url,
             live=live,
             on_event=on_event,
+            on_raw_event=on_raw_event,
             cwd=session_dir,
         )
 
-        # Store result and update session
-        if self.session_store:
-            if result.output:
-                seq = self.session_store.next_sequence(session_id)
-                self.session_store.add_message(
-                    SessionMessage.create(
-                        session_id, "assistant", result.output, sequence=seq,
-                        metadata={"duration_seconds": result.duration_seconds},
-                    )
+        # If no raw events were captured but we have output, store it as a
+        # fallback assistant message (covers adapters that don't emit raw events)
+        if self.session_store and result.output and _raw_event_count[0] == 0:
+            seq = self.session_store.next_sequence(session_id)
+            self.session_store.add_message(
+                SessionMessage.create(
+                    session_id, "assistant", result.output, sequence=seq,
+                    metadata={"duration_seconds": result.duration_seconds, "fallback": True},
                 )
-            if is_new_session:
-                status = SessionStatus.COMPLETED if result.success else SessionStatus.FAILED
-                self.session_store.update_status(session_id, status)
+            )
+
+        # Update session status
+        if self.session_store and is_new_session:
+            status = SessionStatus.COMPLETED if result.success else SessionStatus.FAILED
+            self.session_store.update_status(session_id, status)
 
         return result
+
+
+def _event_type_to_role(event_type: str) -> str:
+    """Map a Claude stream-json event type to a session message role."""
+    mapping = {
+        "assistant": "assistant",
+        "result": "assistant",
+        "system": "system",
+        "tool_use": "assistant",
+        "tool_result": "tool",
+    }
+    return mapping.get(event_type, event_type or "unknown")
+
+
+def _extract_event_content(event: dict) -> str:
+    """Extract a human-readable content string from a raw stream-json event."""
+    event_type = event.get("type", "")
+
+    if event_type == "assistant" and "message" in event:
+        parts = []
+        for block in event["message"].get("content", []):
+            if not isinstance(block, dict):
+                continue
+            if block.get("type") == "text":
+                parts.append(block.get("text", ""))
+            elif block.get("type") == "thinking":
+                parts.append(f"[thinking] {block.get('thinking', '')}")
+            elif block.get("type") == "tool_use":
+                parts.append(f"[tool_use] {block.get('name', '?')}({json.dumps(block.get('input', {}))})")
+            elif block.get("type") == "tool_result":
+                content = block.get("content", "")
+                if isinstance(content, list):
+                    content = " ".join(
+                        b.get("text", "") for b in content if isinstance(b, dict)
+                    )
+                parts.append(f"[tool_result] {content}")
+        return "\n".join(parts) if parts else json.dumps(event)
+
+    if event_type == "result":
+        return event.get("result", "")
+
+    if event_type == "system":
+        subtype = event.get("subtype", "")
+        return f"[system:{subtype}]" if subtype else "[system]"
+
+    return json.dumps(event)

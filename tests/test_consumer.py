@@ -22,7 +22,7 @@ class FakeAdapter(AdapterType):
         self._result = result or RunResult(success=True, output="[fake] done")
 
     def send_message(self, instance, user_message, session_id, session_token="",
-                     api_base_url="", live=True, on_event=None, cwd=None):
+                     api_base_url="", live=True, on_event=None, on_raw_event=None, cwd=None):
         if on_event:
             on_event({"type": "chunk", "text": "hello"})
         return RunResult(

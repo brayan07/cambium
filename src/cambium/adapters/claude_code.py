@@ -50,12 +50,14 @@ class ClaudeCodeAdapter(AdapterType):
         api_base_url: str = "",
         live: bool = True,
         on_event: Callable[[dict[str, Any]], None] | None = None,
+        on_raw_event: Callable[[dict[str, Any]], None] | None = None,
         cwd: Path | None = None,
     ) -> RunResult:
         if not live:
             return self._mock_send(instance, user_message, session_id, on_event)
         return self._live_send(
-            instance, user_message, session_id, session_token, api_base_url, on_event, cwd
+            instance, user_message, session_id, session_token, api_base_url,
+            on_event, on_raw_event, cwd,
         )
 
     def _mock_send(
@@ -79,6 +81,7 @@ class ClaudeCodeAdapter(AdapterType):
         session_token: str,
         api_base_url: str,
         on_event: Callable[[dict[str, Any]], None] | None = None,
+        on_raw_event: Callable[[dict[str, Any]], None] | None = None,
         cwd: Path | None = None,
     ) -> RunResult:
         start = time.monotonic()
@@ -158,6 +161,10 @@ class ClaudeCodeAdapter(AdapterType):
                 # Extract session_id from init event
                 if parsed.get("type") == "system" and parsed.get("subtype") == "init":
                     self._active_sessions.add(session_id)
+
+                # Emit raw stream-json event for persistence
+                if on_raw_event:
+                    on_raw_event(parsed)
 
                 # Translate to OpenAI chunks and emit
                 chunks = _stream_json_to_openai(parsed, chunk_id, model)

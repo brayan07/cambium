@@ -77,6 +77,7 @@ class AdapterType(ABC):
         api_base_url: str = "",
         live: bool = True,
         on_event: Callable[[dict[str, Any]], None] | None = None,
+        on_raw_event: Callable[[dict[str, Any]], None] | None = None,
         cwd: Path | None = None,
     ) -> RunResult:
         """Send a message in a session context.
@@ -92,6 +93,7 @@ class AdapterType(ABC):
             api_base_url: Base URL of the Cambium API server.
             live: If False, return a mock result (for testing).
             on_event: Callback receiving OpenAI chat.completion.chunk dicts.
+            on_raw_event: Callback receiving raw adapter-native events for persistence.
         """
         ...
 
