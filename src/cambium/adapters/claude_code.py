@@ -233,6 +233,41 @@ class ClaudeCodeAdapter(AdapterType):
             return path.read_text()
         return ""
 
+    def launch_interactive(self, instance: AdapterInstance, session_id: str) -> None:
+        """Launch Claude Code in interactive mode.
+
+        Builds the skills directory and system prompt, then execs into
+        the ``claude`` CLI. This replaces the current process.
+        """
+        import atexit
+
+        config = instance.config
+        skill_names = config.get("skills", [])
+        tmp_dir = self._build_skills_dir(skill_names)
+        atexit.register(lambda: shutil.rmtree(tmp_dir, ignore_errors=True))
+
+        system_prompt = self._load_system_prompt(config)
+        prompt_file = Path(tmp_dir) / "system-prompt.md"
+        prompt_file.write_text(system_prompt)
+
+        model = config.get("model", "opus")
+
+        cmd = [
+            "claude",
+            "--session-id", session_id,
+            "--model", model,
+            "--dangerously-skip-permissions",
+            "--add-dir", tmp_dir,
+            "--append-system-prompt-file", str(prompt_file),
+        ]
+
+        log.info(
+            f"Launching interactive session '{session_id[:8]}' "
+            f"instance='{instance.name}' model={model}"
+        )
+
+        os.execvp("claude", cmd)
+
 
 # --- Stream-JSON to OpenAI translation ---
 

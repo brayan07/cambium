@@ -93,3 +93,19 @@ class AdapterType(ABC):
             on_event: Callback receiving OpenAI chat.completion.chunk dicts.
         """
         ...
+
+    def launch_interactive(
+        self,
+        instance: AdapterInstance,
+        session_id: str,
+    ) -> None:
+        """Launch the adapter's native interactive experience.
+
+        Typically execs into the adapter's CLI (e.g. claude, codex).
+        This replaces the current process — it does not return.
+
+        Raises NotImplementedError if the adapter doesn't support interactive mode.
+        """
+        raise NotImplementedError(
+            f"Adapter type '{self.name}' does not support interactive chat"
+        )
