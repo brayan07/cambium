@@ -34,19 +34,17 @@ class TestSeedlingRoutines:
             prompt_path = ROUTINES_DIR / routine.prompt_path
             assert prompt_path.exists(), f"Prompt file missing for {routine.name}: {prompt_path}"
 
-    def test_execution_is_persistent(self) -> None:
+    def test_execution_routine_exists(self) -> None:
         registry = RoutineRegistry(ROUTINES_DIR)
         execution = registry.get("execution")
         assert execution is not None
-        assert execution.persistent is True
-        assert execution.session_key == "event.task_id"
+        assert "task_queued" in execution.subscribe
 
-    def test_interactive_is_persistent(self) -> None:
+    def test_interactive_routine_exists(self) -> None:
         registry = RoutineRegistry(ROUTINES_DIR)
         interactive = registry.get("interactive")
         assert interactive is not None
-        assert interactive.persistent is True
-        assert interactive.session_key == "event.session_id"
+        assert "user_session_start" in interactive.subscribe
 
     def test_event_cascade_coverage(self) -> None:
         """Verify that emitted events have subscribers (no dead-letter events)."""

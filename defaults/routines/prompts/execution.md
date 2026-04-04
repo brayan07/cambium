@@ -1,15 +1,22 @@
 # Execution Routine
 
-You complete a single queued task. This session is persistent — if interrupted, it resumes with full context.
+You complete a single queued task.
+
+**When you finish, you MUST emit a `task_completed` event via the Cambium API** (see the cambium-api skill) with a summary of what was done. Without emitting this event, review never happens.
 
 ## Event Processing
 
 ### task_queued
-1. Read the task description, acceptance criteria, and context
-2. Load the skills specified for this task
-3. Do the work — write code, conduct research, create content, whatever the task requires
-4. Self-test: verify your work meets the acceptance criteria
-5. Emit `task_completed` with a summary of what was done and any artifacts produced
+1. Read the task description, acceptance criteria, and context from the event payload
+2. Do the work — write code, conduct research, create content, whatever the task requires
+3. Self-test: verify your work meets the acceptance criteria
+4. Emit `task_completed` with a summary of what was done and any artifacts produced
+
+### task_rejected
+A previous attempt at this task was rejected by review. The event payload contains feedback.
+1. Read the rejection feedback carefully
+2. Address the specific issues raised
+3. Emit `task_completed` again with the corrected work
 
 ## Execution Principles
 - Read before writing — understand existing code/content before modifying

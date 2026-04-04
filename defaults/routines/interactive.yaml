@@ -1,7 +1,6 @@
 name: interactive
 prompt_path: prompts/interactive.md
-skills: []
+skills: [cambium-api]
 subscribe: [user_session_start]
 emit: [goal_created, feedback_received]
-persistent: true
-session_key: event.session_id
+persistent: false

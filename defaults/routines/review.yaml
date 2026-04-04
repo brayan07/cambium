@@ -1,6 +1,6 @@
 name: review
 prompt_path: prompts/review.md
-skills: [knowledge, memory]
+skills: [cambium-api]
 subscribe: [task_completed]
 emit: [review_complete, task_rejected]
 persistent: false

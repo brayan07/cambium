@@ -79,8 +79,21 @@ class SkillRunner:
             if prompt_file.exists():
                 prompt_text = prompt_file.read_text()
 
+        # Build routine context preamble
+        preamble_lines = [
+            f"You are the **{routine.name}** routine in the Cambium event processing system.",
+            f"You are responding to a `{event.type}` event.",
+        ]
+        if routine.emit:
+            allowed = ", ".join(f"`{e}`" for e in routine.emit)
+            preamble_lines.append(
+                f"You may ONLY emit these event types: {allowed}. "
+                f"Do NOT emit any other event type — doing so will cause errors."
+            )
+        preamble = "\n".join(preamble_lines)
+
         # Assemble full prompt
-        parts = []
+        parts = [preamble]
         if prompt_text:
             parts.append(prompt_text)
         if skill_contents:
@@ -130,6 +143,7 @@ class SkillRunner:
             "--model", "opus",
             "--output-format", "stream-json",
             "--verbose",
+            "--dangerously-skip-permissions",
         ]
 
         # Add system prompt
