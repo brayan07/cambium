@@ -1,0 +1,6 @@
+name: review
+prompt_path: prompts/review.md
+skills: [knowledge, memory]
+subscribe: [task_completed]
+emit: [review_complete, task_rejected]
+persistent: false

@@ -1,0 +1,7 @@
+name: interactive
+prompt_path: prompts/interactive.md
+skills: []
+subscribe: [user_session_start]
+emit: [goal_created, feedback_received]
+persistent: true
+session_key: event.session_id

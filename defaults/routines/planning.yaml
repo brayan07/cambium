@@ -1,0 +1,6 @@
+name: planning
+prompt_path: prompts/planning.md
+skills: [planning, knowledge, memory, task-management]
+subscribe: [goal_needs_plan, plan_invalidated]
+emit: [task_queued]
+persistent: false

@@ -1,0 +1,8 @@
+name: execution
+prompt_path: prompts/execution.md
+skills: []
+subscribe: [task_queued, task_rejected]
+emit: [task_completed]
+persistent: true
+session_key: event.task_id
+working_directory: event.repo
