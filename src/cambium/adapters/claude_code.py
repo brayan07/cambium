@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from cambium.adapters.base import AdapterInstance, AdapterType, RunResult
+from cambium.mcp.registry import MCPRegistry
 from cambium.models.skill import SkillRegistry
 
 log = logging.getLogger(__name__)
@@ -28,9 +29,15 @@ class ClaudeCodeAdapter(AdapterType):
 
     name = "claude-code"
 
-    def __init__(self, skill_registry: SkillRegistry, user_dir: Path | None = None) -> None:
+    def __init__(
+        self,
+        skill_registry: SkillRegistry,
+        user_dir: Path | None = None,
+        mcp_registry: MCPRegistry | None = None,
+    ) -> None:
         self.skill_registry = skill_registry
         self.user_dir = user_dir
+        self.mcp_registry = mcp_registry
         # Track which sessions have been started (for --resume logic)
         self._active_sessions: set[str] = set()
 
@@ -81,6 +88,15 @@ class ClaudeCodeAdapter(AdapterType):
         try:
             skill_names = config.get("skills", [])
             tmp_dir = self._build_skills_dir(skill_names)
+
+            # Resolve MCP servers into cwd — Claude discovers .mcp.json from the
+            # project root (cwd), not from --add-dir.
+            mcp_cwd = None
+            if not cwd:
+                # Create a temp working dir so we have somewhere to write .mcp.json
+                mcp_cwd = Path(tempfile.mkdtemp(prefix="cambium-mcp-"))
+                cwd = mcp_cwd
+            mcp_config_path = self._resolve_mcp_servers(config, cwd)
 
             system_prompt = self._load_system_prompt(config)
             prompt_file = Path(tmp_dir) / "system-prompt.md"
@@ -206,6 +222,37 @@ class ClaudeCodeAdapter(AdapterType):
         finally:
             if tmp_dir and os.path.exists(tmp_dir):
                 shutil.rmtree(tmp_dir, ignore_errors=True)
+            if mcp_cwd and mcp_cwd.exists():
+                shutil.rmtree(mcp_cwd, ignore_errors=True)
+            elif mcp_config_path and mcp_config_path.exists():
+                # Clean up .mcp.json from caller-provided cwd
+                mcp_config_path.unlink(missing_ok=True)
+
+    def _resolve_mcp_servers(self, config: dict, target_dir: Path) -> Path | None:
+        """Resolve named MCP servers and write .mcp.json into target_dir.
+
+        Reads ``mcp_servers`` from the instance config, looks each up in the
+        MCP registry, and writes a Claude Code compatible ``.mcp.json``.
+        Returns the path written, or None if no servers were resolved.
+        """
+        mcp_names = config.get("mcp_servers", [])
+        if not mcp_names or not self.mcp_registry:
+            return None
+
+        mcp_json: dict[str, dict] = {}
+        for name in mcp_names:
+            server = self.mcp_registry.get(name)
+            if server is None:
+                log.warning(f"MCP server '{name}' not found in registry — skipping")
+                continue
+            mcp_json[name] = server.to_mcp_json()
+
+        if mcp_json:
+            config_path = target_dir / ".mcp.json"
+            config_path.write_text(json.dumps({"mcpServers": mcp_json}, indent=2))
+            log.info(f"Wrote .mcp.json with {len(mcp_json)} server(s): {list(mcp_json)}")
+            return config_path
+        return None
 
     def _build_skills_dir(self, skill_names: list[str]) -> str:
         """Create ephemeral directory with .claude/skills/ symlinks."""
@@ -250,6 +297,13 @@ class ClaudeCodeAdapter(AdapterType):
         skill_names = config.get("skills", [])
         tmp_dir = self._build_skills_dir(skill_names)
         atexit.register(lambda: shutil.rmtree(tmp_dir, ignore_errors=True))
+
+        # Resolve MCP servers into cwd — Claude discovers .mcp.json from the
+        # project root (cwd), not from --add-dir.
+        if cwd:
+            mcp_config_path = self._resolve_mcp_servers(config, cwd)
+            if mcp_config_path:
+                atexit.register(lambda p=mcp_config_path: p.unlink(missing_ok=True))
 
         system_prompt = self._load_system_prompt(config)
         prompt_file = Path(tmp_dir) / "system-prompt.md"

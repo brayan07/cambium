@@ -96,12 +96,15 @@ def cmd_chat(args: argparse.Namespace) -> None:
 def _build_adapter_types(user_dir):
     """Build the registry of adapter types from the user directory."""
     from cambium.adapters.claude_code import ClaudeCodeAdapter
+    from cambium.mcp.file_registry import FileRegistry
     from cambium.models.skill import SkillRegistry
 
     skill_dirs = [user_dir / "adapters" / "claude-code" / "skills"]
     skill_registry = SkillRegistry(*[d for d in skill_dirs if d.exists()])
 
-    claude_adapter = ClaudeCodeAdapter(skill_registry, user_dir=user_dir)
+    mcp_registry = FileRegistry(user_dir / "mcp-servers.json")
+
+    claude_adapter = ClaudeCodeAdapter(skill_registry, user_dir=user_dir, mcp_registry=mcp_registry)
     return {claude_adapter.name: claude_adapter}
 
 
