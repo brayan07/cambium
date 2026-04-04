@@ -2,5 +2,5 @@ name: reflection
 adapter_type: claude-code
 config:
   model: opus
-  system_prompt_path: defaults/routines/prompts/reflection.md
+  system_prompt_path: adapters/claude-code/prompts/reflection.md
   skills: [cambium-api]

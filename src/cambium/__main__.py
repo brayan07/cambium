@@ -4,11 +4,11 @@ import argparse
 import json
 import sys
 
-from cambium.cli.init import init_user_repo
-
 
 def cmd_init(args: argparse.Namespace) -> None:
-    path = init_user_repo()
+    from cambium.cli.init import init_user_repo
+
+    path = init_user_repo(github=args.github, repo_name=args.repo_name)
     print(f"Initialised Cambium user repo at {path}")
 
 
@@ -54,18 +54,12 @@ def cmd_chat(args: argparse.Namespace) -> None:
     from pathlib import Path
 
     from cambium.adapters.base import AdapterInstanceRegistry
-    from cambium.adapters.claude_code import ClaudeCodeAdapter
     from cambium.models.routine import RoutineRegistry
-    from cambium.models.skill import SkillRegistry
 
-    framework_dir = Path(__file__).parent.parent.parent
     user_dir = Path.home() / ".cambium"
 
     # Load routine
-    routine_dirs = [framework_dir / "defaults" / "routines"]
-    if (user_dir / "routines").exists():
-        routine_dirs.append(user_dir / "routines")
-    routine_reg = RoutineRegistry(*routine_dirs)
+    routine_reg = RoutineRegistry(user_dir / "routines")
 
     routine = routine_reg.get(args.routine)
     if routine is None:
@@ -73,13 +67,7 @@ def cmd_chat(args: argparse.Namespace) -> None:
         sys.exit(1)
 
     # Load adapter instance
-    instance_dirs = []
-    adapter_dir = framework_dir / "defaults" / "adapters" / "claude-code" / "instances"
-    if adapter_dir.exists():
-        instance_dirs.append(adapter_dir)
-    if (user_dir / "adapters" / "claude-code" / "instances").exists():
-        instance_dirs.append(user_dir / "adapters" / "claude-code" / "instances")
-    instance_reg = AdapterInstanceRegistry(*instance_dirs)
+    instance_reg = AdapterInstanceRegistry(user_dir / "adapters" / "claude-code" / "instances")
 
     instance = instance_reg.get(routine.adapter_instance)
     if instance is None:
@@ -87,35 +75,33 @@ def cmd_chat(args: argparse.Namespace) -> None:
         sys.exit(1)
 
     # Resolve adapter type
-    adapter_types = _build_adapter_types(framework_dir, user_dir)
+    adapter_types = _build_adapter_types(user_dir)
     adapter = adapter_types.get(instance.adapter_type)
     if adapter is None:
         print(f"Error: adapter type '{instance.adapter_type}' not found", file=sys.stderr)
         sys.exit(1)
 
     session_id = str(uuid.uuid4())
+    session_dir = user_dir / "data" / "sessions" / session_id
+    session_dir.mkdir(parents=True, exist_ok=True)
     print(f"Starting chat (routine: {args.routine}, adapter: {instance.adapter_type}, session: {session_id[:8]})")
 
     try:
-        adapter.launch_interactive(instance, session_id)
+        adapter.launch_interactive(instance, session_id, cwd=session_dir)
     except NotImplementedError as e:
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
 
 
-def _build_adapter_types(framework_dir, user_dir):
-    """Build the registry of adapter types. Shared between server and CLI."""
-    from pathlib import Path
-
+def _build_adapter_types(user_dir):
+    """Build the registry of adapter types from the user directory."""
     from cambium.adapters.claude_code import ClaudeCodeAdapter
     from cambium.models.skill import SkillRegistry
 
-    skill_dirs = [framework_dir / "defaults" / "adapters" / "claude-code" / "skills"]
-    if (user_dir / "adapters" / "claude-code" / "skills").exists():
-        skill_dirs.append(user_dir / "adapters" / "claude-code" / "skills")
-    skill_registry = SkillRegistry(*skill_dirs)
+    skill_dirs = [user_dir / "adapters" / "claude-code" / "skills"]
+    skill_registry = SkillRegistry(*[d for d in skill_dirs if d.exists()])
 
-    claude_adapter = ClaudeCodeAdapter(skill_registry, framework_dir=framework_dir)
+    claude_adapter = ClaudeCodeAdapter(skill_registry, user_dir=user_dir)
     return {claude_adapter.name: claude_adapter}
 
 
@@ -124,7 +110,9 @@ def main() -> None:
     sub = parser.add_subparsers(dest="command")
 
     # init
-    sub.add_parser("init", help="Initialise ~/.cambium/ user repo")
+    init_parser = sub.add_parser("init", help="Initialise ~/.cambium/ user repo")
+    init_parser.add_argument("--github", action="store_true", help="Create private GitHub repo")
+    init_parser.add_argument("--repo-name", default="cambium-config", help="GitHub repo name")
 
     # server
     srv = sub.add_parser("server", help="Start the Cambium API server")

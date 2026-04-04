@@ -15,13 +15,14 @@ class FakeAdapter(AdapterType):
         self.last_call = None
 
     def send_message(self, instance, user_message, session_id, session_token="",
-                     api_base_url="", live=True, on_event=None):
+                     api_base_url="", live=True, on_event=None, cwd=None):
         self.last_call = {
             "instance": instance,
             "user_message": user_message,
             "session_id": session_id,
             "token": session_token,
             "api_url": api_base_url,
+            "cwd": cwd,
         }
         return RunResult(success=True, output=f"[fake] ran {instance.name}",
                          session_id=session_id)
@@ -117,6 +118,41 @@ class TestRoutineRunner:
         assert len(messages) == 2  # user + assistant
         assert messages[0].role == "user"
         assert messages[1].role == "assistant"
+
+    def test_session_working_dir_created_and_passed(self, tmp_path: Path):
+        inst_dir = tmp_path / "instances"
+        inst_dir.mkdir()
+        (inst_dir / "triage.yaml").write_text(
+            "name: triage\nadapter_type: fake\nconfig:\n  model: haiku\n"
+        )
+        adapter = FakeAdapter()
+        instance_reg = AdapterInstanceRegistry(inst_dir)
+        runner = RoutineRunner(
+            adapter_types={"fake": adapter},
+            instance_registry=instance_reg,
+            user_dir=tmp_path,
+        )
+        routine = Routine(name="triage", adapter_instance="triage", listen=["goals"])
+        msg = Message.create(channel="goals", payload={"goal": "test"}, source="test")
+
+        result = runner.send_message(routine, msg)
+        assert result.success is True
+
+        # Session working dir should exist
+        session_dir = tmp_path / "data" / "sessions" / adapter.last_call["session_id"]
+        assert session_dir.is_dir()
+
+        # cwd should have been passed to adapter
+        assert adapter.last_call["cwd"] == session_dir
+
+    def test_no_session_dir_without_user_dir(self, tmp_path: Path):
+        runner, adapter = self._make_runner(tmp_path)
+        routine = Routine(name="triage", adapter_instance="triage", listen=["goals"])
+        msg = Message.create(channel="goals", payload={"goal": "test"}, source="test")
+
+        result = runner.send_message(routine, msg)
+        assert result.success is True
+        assert adapter.last_call["cwd"] is None
 
     def test_resume_session_with_existing_id(self, tmp_path: Path):
         runner, adapter = self._make_runner(tmp_path)

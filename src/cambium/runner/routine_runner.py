@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import uuid
+from pathlib import Path
 from typing import Any, Callable
 
 from cambium.adapters.base import AdapterInstanceRegistry, AdapterType, RunResult
@@ -27,11 +28,13 @@ class RoutineRunner:
         instance_registry: AdapterInstanceRegistry,
         session_store: SessionStore | None = None,
         api_base_url: str = "http://127.0.0.1:8350",
+        user_dir: Path | None = None,
     ) -> None:
         self.adapter_types = adapter_types
         self.instance_registry = instance_registry
         self.session_store = session_store
         self.api_base_url = api_base_url
+        self.user_dir = user_dir
 
     def send_message(
         self,
@@ -104,6 +107,12 @@ class RoutineRunner:
                 SessionMessage.create(session_id, "user", user_message, sequence=seq)
             )
 
+        # Create session working directory
+        session_dir = None
+        if self.user_dir:
+            session_dir = self.user_dir / "data" / "sessions" / session_id
+            session_dir.mkdir(parents=True, exist_ok=True)
+
         # Execute
         result = adapter.send_message(
             instance=instance,
@@ -113,6 +122,7 @@ class RoutineRunner:
             api_base_url=self.api_base_url,
             live=live,
             on_event=on_event,
+            cwd=session_dir,
         )
 
         # Store result and update session

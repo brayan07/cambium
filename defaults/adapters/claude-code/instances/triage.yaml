@@ -2,5 +2,5 @@ name: triage
 adapter_type: claude-code
 config:
   model: opus
-  system_prompt_path: defaults/routines/prompts/triage.md
+  system_prompt_path: adapters/claude-code/prompts/triage.md
   skills: [cambium-api]

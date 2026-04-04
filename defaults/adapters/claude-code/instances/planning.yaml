@@ -2,5 +2,5 @@ name: planning
 adapter_type: claude-code
 config:
   model: opus
-  system_prompt_path: defaults/routines/prompts/planning.md
+  system_prompt_path: adapters/claude-code/prompts/planning.md
   skills: [cambium-api]
