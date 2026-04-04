@@ -1,4 +1,4 @@
-"""Event data model."""
+"""Message data model — the unit of communication in Cambium's channel-based pub/sub."""
 
 from __future__ import annotations
 
@@ -8,24 +8,23 @@ from datetime import datetime, timezone
 
 
 @dataclass
-class Event:
-    """An event flowing through the Cambium queue."""
+class Message:
+    """A message published to a channel."""
 
     id: str
-    type: str
+    channel: str
     payload: dict
-    source: str
+    source: str  # routine that published this
     timestamp: datetime
     status: str = "pending"
     attempts: int = 0
     claimed_at: datetime | None = None
 
     @classmethod
-    def create(cls, type: str, payload: dict, source: str) -> Event:
-        """Factory for creating a new event with auto-generated id and timestamp."""
+    def create(cls, channel: str, payload: dict, source: str) -> Message:
         return cls(
             id=str(uuid.uuid4()),
-            type=type,
+            channel=channel,
             payload=payload,
             source=source,
             timestamp=datetime.now(timezone.utc),

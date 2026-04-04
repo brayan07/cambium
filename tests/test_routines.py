@@ -2,9 +2,11 @@
 
 from pathlib import Path
 from cambium.models.routine import RoutineRegistry
+from cambium.adapters.base import AdapterInstanceRegistry
 
 
 ROUTINES_DIR = Path(__file__).parent.parent / "defaults" / "routines"
+INSTANCES_DIR = Path(__file__).parent.parent / "defaults" / "adapters" / "claude-code" / "instances"
 EXPECTED_ROUTINES = ["triage", "planning", "execution", "review", "reflection", "interactive"]
 
 
@@ -15,46 +17,48 @@ class TestSeedlingRoutines:
 
     def test_expected_names(self) -> None:
         registry = RoutineRegistry(ROUTINES_DIR)
-        names = sorted(registry.names() if hasattr(registry, 'names') else [r.name for r in registry.all()])
+        names = sorted([r.name for r in registry.all()])
         assert names == sorted(EXPECTED_ROUTINES)
 
-    def test_subscribe_populated(self) -> None:
+    def test_listen_populated(self) -> None:
         registry = RoutineRegistry(ROUTINES_DIR)
         for routine in registry.all():
-            assert len(routine.subscribe) > 0, f"{routine.name} has no subscriptions"
+            assert len(routine.listen) > 0, f"{routine.name} has no channel subscriptions"
 
-    def test_emit_populated(self) -> None:
+    def test_publish_populated(self) -> None:
         registry = RoutineRegistry(ROUTINES_DIR)
         for routine in registry.all():
-            assert len(routine.emit) > 0, f"{routine.name} has no emit types"
+            assert len(routine.publish) > 0, f"{routine.name} has no publish channels"
 
-    def test_prompt_files_exist(self) -> None:
-        registry = RoutineRegistry(ROUTINES_DIR)
-        for routine in registry.all():
-            prompt_path = ROUTINES_DIR / routine.prompt_path
-            assert prompt_path.exists(), f"Prompt file missing for {routine.name}: {prompt_path}"
+    def test_adapter_instances_exist(self) -> None:
+        """Every routine references an adapter instance that exists."""
+        routine_reg = RoutineRegistry(ROUTINES_DIR)
+        instance_reg = AdapterInstanceRegistry(INSTANCES_DIR)
+        for routine in routine_reg.all():
+            inst = instance_reg.get(routine.adapter_instance)
+            assert inst is not None, f"Missing adapter instance '{routine.adapter_instance}' for routine '{routine.name}'"
 
     def test_execution_routine_exists(self) -> None:
         registry = RoutineRegistry(ROUTINES_DIR)
         execution = registry.get("execution")
         assert execution is not None
-        assert "task_queued" in execution.subscribe
+        assert "tasks" in execution.listen
 
     def test_interactive_routine_exists(self) -> None:
         registry = RoutineRegistry(ROUTINES_DIR)
         interactive = registry.get("interactive")
         assert interactive is not None
-        assert "user_session_start" in interactive.subscribe
+        assert "sessions" in interactive.listen
 
-    def test_event_cascade_coverage(self) -> None:
-        """Verify that emitted events have subscribers (no dead-letter events)."""
+    def test_channel_cascade_coverage(self) -> None:
+        """Verify that published channels have listeners (no dead-letter messages)."""
         registry = RoutineRegistry(ROUTINES_DIR)
-        all_subscribed = set(registry.subscribed_event_types())
-        all_emitted: set[str] = set()
+        all_listened = set(registry.subscribed_channels())
+        all_published: set[str] = set()
         for r in registry.all():
-            all_emitted.update(r.emit)
-        # External triggers don't need internal subscribers
-        external = {"schedule_daily", "user_session_start", "skill_improvement_proposed"}
-        internal_emitted = all_emitted - external
-        unhandled = internal_emitted - all_subscribed
-        assert not unhandled, f"Emitted events with no subscriber: {unhandled}"
+            all_published.update(r.publish)
+        # External channels don't need internal listeners
+        external = {"schedule", "sessions", "improvements"}
+        internal_published = all_published - external
+        unhandled = internal_published - all_listened
+        assert not unhandled, f"Published channels with no listener: {unhandled}"

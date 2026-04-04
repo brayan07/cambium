@@ -1,6 +1,4 @@
 name: execution
-prompt_path: prompts/execution.md
-skills: [cambium-api]
-subscribe: [task_queued, task_rejected]
-emit: [task_completed]
-persistent: false
+adapter_instance: execution
+listen: [tasks, rejections]
+publish: [completions]

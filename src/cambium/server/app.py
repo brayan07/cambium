@@ -1,4 +1,4 @@
-"""Cambium API server — the central coordination point for all Cambium operations."""
+"""Cambium API server — channel-based pub/sub with JWT session auth."""
 
 from __future__ import annotations
 
@@ -7,16 +7,23 @@ import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+import jwt
 import uvicorn
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field
 
-from cambium.models.event import Event
+from cambium.adapters.base import AdapterInstanceRegistry
+from cambium.adapters.claude_code import ClaudeCodeAdapter
+from cambium.consumer.loop import ConsumerLoop
+from cambium.models.message import Message
 from cambium.models.routine import RoutineRegistry
 from cambium.models.skill import SkillRegistry
 from cambium.queue.sqlite import SQLiteQueue
-from cambium.runner.skill_runner import SkillRunner
-from cambium.consumer.loop import ConsumerLoop
+from cambium.runner.routine_runner import RoutineRunner
+from cambium.server.auth import verify_session_token
+from cambium.server import sessions as sessions_module
+from cambium.session.broadcaster import BroadcasterRegistry
+from cambium.session.store import SessionStore
 
 log = logging.getLogger(__name__)
 
@@ -24,67 +31,55 @@ log = logging.getLogger(__name__)
 # --- Pydantic request/response models ---
 
 
-class EventCreate(BaseModel):
-    """Request body for creating a new event."""
-
-    type: str
+class PublishRequest(BaseModel):
     payload: dict = Field(default_factory=dict)
-    source: str = "api"
 
 
-class EventResponse(BaseModel):
-    """Response body for an event."""
-
+class PublishResponse(BaseModel):
     id: str
-    type: str
-    payload: dict
-    source: str
-    timestamp: str
+    channel: str
     status: str
-    attempts: int
+
+
+class ChannelPermissions(BaseModel):
+    routine: str
+    listen: list[str]
+    publish: list[str]
 
 
 class QueueStatus(BaseModel):
-    """Response body for queue status."""
-
     pending: int
-    subscribed_event_types: list[str]
+    subscribed_channels: list[str]
 
 
 class HealthResponse(BaseModel):
-    """Response body for health check."""
-
     status: str
     consumer_running: bool
-    pending_events: int
+    pending_messages: int
 
 
 # --- Server state ---
 
 
 class CambiumServer:
-    """Holds all server state and components."""
-
     def __init__(
         self,
         queue: SQLiteQueue,
         routine_registry: RoutineRegistry,
-        skill_runner: SkillRunner,
+        routine_runner: RoutineRunner,
         consumer: ConsumerLoop,
     ) -> None:
         self.queue = queue
         self.routine_registry = routine_registry
-        self.skill_runner = skill_runner
+        self.routine_runner = routine_runner
         self.consumer = consumer
         self._consumer_task: asyncio.Task | None = None
 
     async def start_consumer(self) -> None:
-        """Start the consumer loop as a background asyncio task."""
         self._consumer_task = asyncio.create_task(self._run_consumer())
         log.info("Consumer loop started")
 
     async def stop_consumer(self) -> None:
-        """Stop the consumer loop."""
         if self._consumer_task:
             self._consumer_task.cancel()
             try:
@@ -99,23 +94,44 @@ class CambiumServer:
         return self._consumer_task is not None and not self._consumer_task.done()
 
     async def _run_consumer(self) -> None:
-        """Run the consumer loop in async context, offloading blocking work to thread pool."""
         loop = asyncio.get_event_loop()
         while True:
             try:
-                # Run tick in thread pool so it doesn't block the event loop
                 results = await loop.run_in_executor(None, self.consumer.tick)
                 for r in results:
                     status = "OK" if r.success else "FAIL"
-                    log.info(f"Session result: {status} — {r.output[:100] if r.output else r.error}")
+                    log.info(f"Run result: {status} — {r.output[:100] if r.output else r.error}")
             except Exception:
                 log.exception("Consumer tick error")
             await asyncio.sleep(self.consumer.poll_interval)
 
 
-# --- Module-level state (set during lifespan) ---
+# --- Module-level state ---
 
 _server: CambiumServer | None = None
+
+
+def _get_routine_permissions(routine_name: str) -> tuple[list[str], list[str]]:
+    """Get listen/publish permissions for a routine."""
+    if _server is None:
+        return [], []
+    routine = _server.routine_registry.get(routine_name)
+    if routine is None:
+        return [], []
+    return routine.listen, routine.publish
+
+
+def _authenticate(authorization: str | None) -> dict:
+    """Validate JWT and return claims. Raises HTTPException on failure."""
+    if not authorization:
+        raise HTTPException(status_code=401, detail="Missing Authorization header")
+
+    # Accept "Bearer <token>" or raw token
+    token = authorization.removeprefix("Bearer ").strip()
+    try:
+        return verify_session_token(token)
+    except jwt.InvalidTokenError as e:
+        raise HTTPException(status_code=401, detail=f"Invalid token: {e}")
 
 
 def build_server(
@@ -124,6 +140,7 @@ def build_server(
     user_dir: Path | None = None,
     live: bool = False,
     poll_interval: float = 2.0,
+    api_base_url: str = "http://127.0.0.1:8350",
 ) -> CambiumServer:
     """Construct all Cambium components and return a CambiumServer."""
     framework_dir = framework_dir or Path(__file__).parent.parent.parent.parent
@@ -136,11 +153,24 @@ def build_server(
         db_path = str(db_dir / "cambium.db")
     queue = SQLiteQueue(db_path)
 
-    # Skill registry — framework defaults + user overrides
-    skill_dirs = [framework_dir / "defaults" / "skills"]
-    if (user_dir / "skills").exists():
-        skill_dirs.append(user_dir / "skills")
+    # Skill registry (owned by Claude Code adapter type)
+    skill_dirs = [framework_dir / "defaults" / "adapters" / "claude-code" / "skills"]
+    if (user_dir / "adapters" / "claude-code" / "skills").exists():
+        skill_dirs.append(user_dir / "adapters" / "claude-code" / "skills")
     skill_registry = SkillRegistry(*skill_dirs)
+
+    # Adapter instances
+    instance_dirs = []
+    adapter_instances_dir = framework_dir / "defaults" / "adapters" / "claude-code" / "instances"
+    if adapter_instances_dir.exists():
+        instance_dirs.append(adapter_instances_dir)
+    if (user_dir / "adapters" / "claude-code" / "instances").exists():
+        instance_dirs.append(user_dir / "adapters" / "claude-code" / "instances")
+    instance_registry = AdapterInstanceRegistry(*instance_dirs)
+
+    # Adapter types
+    claude_adapter = ClaudeCodeAdapter(skill_registry, framework_dir=framework_dir)
+    adapter_types = {claude_adapter.name: claude_adapter}
 
     # Routine registry
     routine_dirs = [framework_dir / "defaults" / "routines"]
@@ -148,17 +178,40 @@ def build_server(
         routine_dirs.append(user_dir / "routines")
     routine_registry = RoutineRegistry(*routine_dirs)
 
-    # Runner and consumer
-    skill_runner = SkillRunner(skill_registry)
+    # Session store (shares DB with queue)
+    session_store = SessionStore(db_path)
+
+    # Broadcaster registry for live streaming
+    broadcaster_registry = BroadcasterRegistry()
+
+    # Routine runner
+    routine_runner = RoutineRunner(
+        adapter_types=adapter_types,
+        instance_registry=instance_registry,
+        session_store=session_store,
+        api_base_url=api_base_url,
+    )
+
+    # Configure session endpoints
+    sessions_module.configure(
+        session_store=session_store,
+        broadcaster_registry=broadcaster_registry,
+        routine_registry=routine_registry,
+        routine_runner=routine_runner,
+    )
+
+    # Consumer loop
     consumer = ConsumerLoop(
         queue=queue,
         routine_registry=routine_registry,
-        skill_runner=skill_runner,
+        routine_runner=routine_runner,
+        broadcaster_registry=broadcaster_registry,
         poll_interval=poll_interval,
         live=live,
     )
 
     log.info(f"Skills: {skill_registry.names()}")
+    log.info(f"Adapter instances: {[i.name for i in instance_registry.all()]}")
     log.info(f"Routines: {[r.name for r in routine_registry.all()]}")
     log.info(f"Queue DB: {db_path}")
     log.info(f"Live mode: {live}")
@@ -166,14 +219,13 @@ def build_server(
     return CambiumServer(
         queue=queue,
         routine_registry=routine_registry,
-        skill_runner=skill_runner,
+        routine_runner=routine_runner,
         consumer=consumer,
     )
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Start consumer on startup, stop on shutdown."""
     global _server
     if _server is not None:
         await _server.start_consumer()
@@ -187,9 +239,11 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Cambium",
     description="Personal AI agent skill lifecycle engine",
-    version="0.1.0",
+    version="0.3.0",
     lifespan=lifespan,
 )
+
+app.include_router(sessions_module.router)
 
 
 def _get_server() -> CambiumServer:
@@ -198,61 +252,77 @@ def _get_server() -> CambiumServer:
     return _server
 
 
-# --- Routes ---
+# --- Channel endpoints (JWT-protected) ---
 
 
-@app.post("/events", response_model=EventResponse, status_code=201)
-def create_event(body: EventCreate):
-    """Enqueue a new event."""
+@app.post("/channels/{channel}/publish", response_model=PublishResponse, status_code=201)
+def publish_to_channel(
+    channel: str,
+    body: PublishRequest,
+    authorization: str | None = Header(default=None),
+):
+    """Publish a message to a channel. Requires valid session token."""
     server = _get_server()
-    event = Event.create(type=body.type, payload=body.payload, source=body.source)
-    server.queue.enqueue(event)
-    log.info(f"Enqueued event: {event.type} (id={event.id[:8]})")
-    return EventResponse(
-        id=event.id,
-        type=event.type,
-        payload=event.payload,
-        source=event.source,
-        timestamp=event.timestamp.isoformat(),
-        status="pending",
-        attempts=0,
+    claims = _authenticate(authorization)
+
+    routine_name = claims["routine"]
+    _, allowed_publish = _get_routine_permissions(routine_name)
+
+    if channel not in allowed_publish:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Routine '{routine_name}' is not allowed to publish to '{channel}'",
+        )
+
+    message = Message.create(
+        channel=channel,
+        payload=body.payload,
+        source=routine_name,
     )
+    server.queue.publish(message)
+    log.info(f"Published to '{channel}' by '{routine_name}' (id={message.id[:8]})")
+
+    return PublishResponse(id=message.id, channel=channel, status="pending")
+
+
+@app.get("/channels/permissions", response_model=ChannelPermissions)
+def get_permissions(authorization: str | None = Header(default=None)):
+    """Get channel permissions for the authenticated routine."""
+    claims = _authenticate(authorization)
+    routine_name = claims["routine"]
+    listen, publish = _get_routine_permissions(routine_name)
+    return ChannelPermissions(routine=routine_name, listen=listen, publish=publish)
+
+
+# --- Unauthenticated endpoints ---
+
+
+@app.post("/channels/{channel}/send", response_model=PublishResponse, status_code=201)
+def send_to_channel(channel: str, body: PublishRequest):
+    """Publish a message without auth — for external triggers, CLI, and testing."""
+    server = _get_server()
+    message = Message.create(channel=channel, payload=body.payload, source="external")
+    server.queue.publish(message)
+    log.info(f"External send to '{channel}' (id={message.id[:8]})")
+    return PublishResponse(id=message.id, channel=channel, status="pending")
 
 
 @app.get("/queue/status", response_model=QueueStatus)
 def queue_status():
-    """Get queue status."""
     server = _get_server()
     return QueueStatus(
         pending=server.queue.pending_count(),
-        subscribed_event_types=server.routine_registry.subscribed_event_types(),
+        subscribed_channels=server.routine_registry.subscribed_channels(),
     )
-
-
-@app.post("/queue/{event_id}/ack")
-def ack_event(event_id: str):
-    """Acknowledge (complete) an event."""
-    server = _get_server()
-    server.queue.ack(event_id)
-    return {"status": "acked", "event_id": event_id}
-
-
-@app.post("/queue/{event_id}/nack")
-def nack_event(event_id: str):
-    """Negative-acknowledge (retry) an event."""
-    server = _get_server()
-    server.queue.nack(event_id)
-    return {"status": "nacked", "event_id": event_id}
 
 
 @app.get("/health", response_model=HealthResponse)
 def health():
-    """Health check."""
     server = _get_server()
     return HealthResponse(
         status="ok",
         consumer_running=server.consumer_running,
-        pending_events=server.queue.pending_count(),
+        pending_messages=server.queue.pending_count(),
     )
 
 
@@ -266,7 +336,6 @@ def run_server(
     poll_interval: float = 2.0,
     log_level: str = "info",
 ) -> None:
-    """Start the Cambium server."""
     global _server
     logging.basicConfig(
         level=getattr(logging, log_level.upper()),

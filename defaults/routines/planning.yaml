@@ -1,6 +1,4 @@
 name: planning
-prompt_path: prompts/planning.md
-skills: [cambium-api]
-subscribe: [goal_needs_plan, plan_invalidated]
-emit: [task_queued]
-persistent: false
+adapter_instance: planning
+listen: [plans]
+publish: [tasks]

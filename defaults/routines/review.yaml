@@ -1,6 +1,4 @@
 name: review
-prompt_path: prompts/review.md
-skills: [cambium-api]
-subscribe: [task_completed]
-emit: [review_complete, task_rejected]
-persistent: false
+adapter_instance: review
+listen: [completions]
+publish: [reviews, rejections]

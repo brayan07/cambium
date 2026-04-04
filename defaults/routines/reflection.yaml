@@ -1,6 +1,4 @@
 name: reflection
-prompt_path: prompts/reflection.md
-skills: [cambium-api]
-subscribe: [review_complete, schedule_daily, reflection_needed]
-emit: [skill_improvement_proposed]
-persistent: false
+adapter_instance: reflection
+listen: [reviews, schedule, reflections]
+publish: [improvements]

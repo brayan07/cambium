@@ -3,18 +3,37 @@
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import patch
 
+from cambium.adapters.base import AdapterInstance, AdapterInstanceRegistry, AdapterType, RunResult
 from cambium.consumer.loop import ConsumerLoop
-from cambium.models.event import Event
-from cambium.models.routine import Routine, RoutineRegistry
-from cambium.models.skill import SkillRegistry
+from cambium.models.message import Message
+from cambium.models.routine import RoutineRegistry
 from cambium.queue.sqlite import SQLiteQueue
-from cambium.runner.skill_runner import SessionResult, SkillRunner
+from cambium.runner.routine_runner import RoutineRunner
+from cambium.session.broadcaster import BroadcasterRegistry
 
 
-def _make_routine_dir(tmp_path: Path, routines: list[tuple[str, str]]) -> Path:
-    """Create routine YAML files. Each tuple is (filename, yaml_content)."""
+class FakeAdapter(AdapterType):
+    """A fake adapter that returns configurable results."""
+
+    name = "fake"
+
+    def __init__(self, result: RunResult | None = None):
+        self._result = result or RunResult(success=True, output="[fake] done")
+
+    def send_message(self, instance, user_message, session_id, session_token="",
+                     api_base_url="", live=True, on_event=None):
+        if on_event:
+            on_event({"type": "chunk", "text": "hello"})
+        return RunResult(
+            success=self._result.success,
+            output=self._result.output,
+            error=self._result.error,
+            session_id=session_id,
+        )
+
+
+def _make_routines_dir(tmp_path: Path, routines: list[tuple[str, str]]) -> Path:
     d = tmp_path / "routines"
     d.mkdir(exist_ok=True)
     for name, content in routines:
@@ -22,152 +41,115 @@ def _make_routine_dir(tmp_path: Path, routines: list[tuple[str, str]]) -> Path:
     return d
 
 
-def _make_skill_dir(tmp_path: Path) -> Path:
-    d = tmp_path / "skills"
+def _make_instances_dir(tmp_path: Path) -> Path:
+    d = tmp_path / "instances"
     d.mkdir(exist_ok=True)
-    (d / "basic.md").write_text("---\nname: basic\n---\n# Basic skill\n")
+    (d / "basic.yaml").write_text("name: basic\nadapter_type: fake\n")
     return d
 
 
+def _make_loop(tmp_path, routines, adapter=None) -> tuple[ConsumerLoop, SQLiteQueue]:
+    routine_dir = _make_routines_dir(tmp_path, routines)
+    instance_dir = _make_instances_dir(tmp_path)
+
+    queue = SQLiteQueue()
+    routine_reg = RoutineRegistry(routine_dir)
+    instance_reg = AdapterInstanceRegistry(instance_dir)
+    adapter = adapter or FakeAdapter()
+    runner = RoutineRunner(
+        adapter_types={adapter.name: adapter},
+        instance_registry=instance_reg,
+    )
+    loop = ConsumerLoop(queue, routine_reg, runner)
+    return loop, queue
+
+
 class TestConsumerLoop:
-    def test_event_matches_correct_routine(self, tmp_path: Path):
-        skill_dir = _make_skill_dir(tmp_path)
-        routine_dir = _make_routine_dir(tmp_path, [
-            ("grooming.yaml", "prompt_path: ''\nskills: [basic]\nsubscribe: [task_queued]\n"),
-            ("execution.yaml", "prompt_path: ''\nskills: [basic]\nsubscribe: [task_ready]\n"),
+    def test_message_matches_correct_routine(self, tmp_path: Path):
+        loop, queue = _make_loop(tmp_path, [
+            ("handler.yaml", "name: handler\nadapter_instance: basic\nlisten: [tasks]\n"),
+            ("other.yaml", "name: other\nadapter_instance: basic\nlisten: [reviews]\n"),
         ])
-
-        queue = SQLiteQueue()
-        skill_reg = SkillRegistry(skill_dir)
-        routine_reg = RoutineRegistry(routine_dir)
-        runner = SkillRunner(skill_reg)
-        loop = ConsumerLoop(queue, routine_reg, runner)
-
-        ev = Event.create(type="task_queued", payload={}, source="test")
-        queue.enqueue(ev)
+        queue.publish(Message.create(channel="tasks", payload={}, source="test"))
 
         results = loop.tick()
         assert len(results) == 1
         assert results[0].success is True
-        assert "grooming" in results[0].output
 
-    def test_emitted_events_are_re_enqueued(self, tmp_path: Path):
-        skill_dir = _make_skill_dir(tmp_path)
-        routine_dir = _make_routine_dir(tmp_path, [
-            ("handler.yaml", "prompt_path: ''\nskills: [basic]\nsubscribe: [trigger]\n"),
-        ])
-
-        queue = SQLiteQueue()
-        skill_reg = SkillRegistry(skill_dir)
-        routine_reg = RoutineRegistry(routine_dir)
-        runner = SkillRunner(skill_reg)
-
-        # Patch execute to emit a follow-up event
-        follow_up = Event.create(type="follow_up", payload={}, source="handler")
-        original_execute = runner.execute
-
-        def mock_execute(config, **kwargs):
-            result = original_execute(config, live=False)
-            result.events_emitted = [follow_up]
-            return result
-
-        runner.execute = mock_execute
-
-        loop = ConsumerLoop(queue, routine_reg, runner)
-        ev = Event.create(type="trigger", payload={}, source="test")
-        queue.enqueue(ev)
+    def test_failed_execution_nacks_message(self, tmp_path: Path):
+        adapter = FakeAdapter(RunResult(success=False, output="", error="boom"))
+        loop, queue = _make_loop(tmp_path, [
+            ("handler.yaml", "name: handler\nadapter_instance: basic\nlisten: [tasks]\n"),
+        ], adapter=adapter)
+        queue.publish(Message.create(channel="tasks", payload={}, source="test"))
 
         loop.tick()
+        assert queue.pending_count(["tasks"]) == 1
 
-        # follow_up should now be in the queue
-        assert queue.pending_count(["follow_up"]) == 1
-
-    def test_failed_execution_nacks_event(self, tmp_path: Path):
-        skill_dir = _make_skill_dir(tmp_path)
-        routine_dir = _make_routine_dir(tmp_path, [
-            ("handler.yaml", "prompt_path: ''\nskills: [basic]\nsubscribe: [trigger]\n"),
+    def test_no_matching_routine_acks_message(self, tmp_path: Path):
+        loop, queue = _make_loop(tmp_path, [
+            ("handler.yaml", "name: handler\nadapter_instance: basic\nlisten: [tasks, other]\n"),
         ])
-
-        queue = SQLiteQueue()
-        skill_reg = SkillRegistry(skill_dir)
-        routine_reg = RoutineRegistry(routine_dir)
-        runner = SkillRunner(skill_reg)
-
-        # Make execute return failure
-        def failing_execute(config):
-            return SessionResult(success=False, output="", error="boom")
-
-        runner.execute = failing_execute
-
-        loop = ConsumerLoop(queue, routine_reg, runner)
-        ev = Event.create(type="trigger", payload={}, source="test")
-        queue.enqueue(ev)
-
-        loop.tick()
-
-        # Event should be back in pending (nacked)
-        assert queue.pending_count(["trigger"]) == 1
-
-    def test_no_matching_routine_acks_event(self, tmp_path: Path):
-        skill_dir = _make_skill_dir(tmp_path)
-        # Subscribe to "trigger" but enqueue "other_type"
-        routine_dir = _make_routine_dir(tmp_path, [
-            ("handler.yaml", "prompt_path: ''\nskills: [basic]\nsubscribe: [trigger, other_type]\n"),
-        ])
-
-        queue = SQLiteQueue()
-        skill_reg = SkillRegistry(skill_dir)
-        routine_reg = RoutineRegistry(routine_dir)
-        runner = SkillRunner(skill_reg)
-        loop = ConsumerLoop(queue, routine_reg, runner)
-
-        # Enqueue "other_type" — it will match the routine so test the real no-match case
-        # We need an event type that IS subscribed (so it gets dequeued) but has no matching routine
-        # Actually, for_event_type will return the handler since it subscribes to other_type.
-        # To test true no-match, we'd need a type that is in subscribed_event_types but removed.
-        # Let's test with a routine that subscribes to the event:
-        ev = Event.create(type="other_type", payload={}, source="test")
-        queue.enqueue(ev)
+        queue.publish(Message.create(channel="other", payload={}, source="test"))
 
         results = loop.tick()
-        # It should match the handler routine and succeed
         assert len(results) == 1
         assert queue.pending_count() == 0
 
     def test_max_ticks_stops_loop(self, tmp_path: Path):
-        skill_dir = _make_skill_dir(tmp_path)
-        routine_dir = _make_routine_dir(tmp_path, [
-            ("handler.yaml", "prompt_path: ''\nskills: [basic]\nsubscribe: [x]\n"),
+        loop, _ = _make_loop(tmp_path, [
+            ("handler.yaml", "name: handler\nadapter_instance: basic\nlisten: [x]\n"),
         ])
-
-        queue = SQLiteQueue()
-        skill_reg = SkillRegistry(skill_dir)
-        routine_reg = RoutineRegistry(routine_dir)
-        runner = SkillRunner(skill_reg)
-        loop = ConsumerLoop(queue, routine_reg, runner, poll_interval=0.0)
-
-        # Should terminate after 3 ticks without hanging
+        loop.poll_interval = 0.0
         loop.run(max_ticks=3)
 
-    def test_exception_in_build_session_nacks(self, tmp_path: Path):
-        skill_dir = _make_skill_dir(tmp_path)
-        # Routine references a missing skill
-        routine_dir = _make_routine_dir(tmp_path, [
-            ("handler.yaml", "prompt_path: ''\nskills: [nonexistent]\nsubscribe: [trigger]\n"),
+    def test_missing_adapter_instance_returns_error(self, tmp_path: Path):
+        routine_dir = _make_routines_dir(tmp_path, [
+            ("handler.yaml", "name: handler\nadapter_instance: nonexistent\nlisten: [tasks]\n"),
         ])
+        instance_dir = _make_instances_dir(tmp_path)
 
         queue = SQLiteQueue()
-        skill_reg = SkillRegistry(skill_dir)
         routine_reg = RoutineRegistry(routine_dir)
-        runner = SkillRunner(skill_reg)
+        instance_reg = AdapterInstanceRegistry(instance_dir)
+        runner = RoutineRunner(
+            adapter_types={"fake": FakeAdapter()},
+            instance_registry=instance_reg,
+        )
         loop = ConsumerLoop(queue, routine_reg, runner)
-
-        ev = Event.create(type="trigger", payload={}, source="test")
-        queue.enqueue(ev)
+        queue.publish(Message.create(channel="tasks", payload={}, source="test"))
 
         results = loop.tick()
         assert len(results) == 1
         assert results[0].success is False
-        assert "Missing skills" in results[0].error
-        # Event should be nacked
-        assert queue.pending_count(["trigger"]) == 1
+        assert "not found" in results[0].error
+
+    def test_broadcaster_receives_chunks(self, tmp_path: Path):
+        """One-shot executions stream chunks through a broadcaster."""
+        broadcaster_reg = BroadcasterRegistry()
+        loop, queue = _make_loop(tmp_path, [
+            ("handler.yaml", "name: handler\nadapter_instance: basic\nlisten: [tasks]\n"),
+        ])
+        loop.broadcaster_registry = broadcaster_reg
+
+        queue.publish(Message.create(channel="tasks", payload={}, source="test"))
+        results = loop.tick()
+
+        assert len(results) == 1
+        assert results[0].success is True
+        # Broadcaster should have been created and cleaned up
+        assert broadcaster_reg.active_count() == 0
+
+    def test_broadcaster_closed_on_failure(self, tmp_path: Path):
+        """Broadcaster is cleaned up even when execution fails."""
+        broadcaster_reg = BroadcasterRegistry()
+        adapter = FakeAdapter(RunResult(success=False, output="", error="boom"))
+        loop, queue = _make_loop(tmp_path, [
+            ("handler.yaml", "name: handler\nadapter_instance: basic\nlisten: [tasks]\n"),
+        ], adapter=adapter)
+        loop.broadcaster_registry = broadcaster_reg
+
+        queue.publish(Message.create(channel="tasks", payload={}, source="test"))
+        loop.tick()
+
+        assert broadcaster_reg.active_count() == 0
