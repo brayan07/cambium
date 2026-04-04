@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 from cambium.adapters.base import AdapterInstanceRegistry
 from cambium.adapters.claude_code import ClaudeCodeAdapter
 from cambium.consumer.loop import ConsumerLoop
+from cambium.mcp.file_registry import FileRegistry
 from cambium.models.message import Message
 from cambium.models.routine import RoutineRegistry
 from cambium.models.skill import SkillRegistry
@@ -163,8 +164,11 @@ def build_server(
     instance_dirs = [user_dir / "adapters" / "claude-code" / "instances"]
     instance_registry = AdapterInstanceRegistry(*[d for d in instance_dirs if d.exists()])
 
+    # MCP registry
+    mcp_registry = FileRegistry(user_dir / "mcp-servers.json")
+
     # Adapter types
-    claude_adapter = ClaudeCodeAdapter(skill_registry, user_dir=user_dir)
+    claude_adapter = ClaudeCodeAdapter(skill_registry, user_dir=user_dir, mcp_registry=mcp_registry)
     adapter_types = {claude_adapter.name: claude_adapter}
 
     # Routine registry
