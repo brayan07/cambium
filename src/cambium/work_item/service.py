@@ -23,9 +23,10 @@ _MAX_ROLLUP_DEPTH = 10
 class WorkItemService:
     """Wraps WorkItemStore with rollup, dependency resolution, and channel publishing."""
 
-    def __init__(self, store: WorkItemStore, queue: QueueAdapter) -> None:
+    def __init__(self, store: WorkItemStore, queue: QueueAdapter, preference_service=None) -> None:
         self.store = store
         self.queue = queue
+        self.preference_service = preference_service
 
     # ── public API ───────────────────────────────────────────────────
 
@@ -224,9 +225,16 @@ class WorkItemService:
             )
             # Revert to active so fail_item can do active → failed normally
             self._force_status(item_id, WorkItemStatus.ACTIVE, actor, session_id, reason="review_rejection")
+
+            # Process preference signals before returning
+            self._process_preference_signals(item_id, verdict, feedback, actor)
+
             return self.fail_item(item_id, f"Rejected: {feedback}", actor, session_id)
         else:
             raise ValueError(f"Invalid verdict: {verdict}. Use 'accepted' or 'rejected'.")
+
+        # Process preference signals for accepted verdicts
+        self._process_preference_signals(item_id, verdict, feedback, actor)
 
         return self.store.get(item_id)
 
@@ -489,3 +497,33 @@ class WorkItemService:
             session_id=session_id,
         )
         self.store._conn.commit()
+
+    def _process_preference_signals(
+        self,
+        item_id: str,
+        verdict: str,
+        feedback: str,
+        actor: str | None,
+    ) -> None:
+        """Extract preference signals from a review and publish for case generation."""
+        if self.preference_service is None:
+            return
+        item = self.store.get(item_id)
+        if item is None:
+            return
+        try:
+            self.preference_service.process_review(item, verdict, feedback, actor)
+        except Exception:
+            logger.exception("Failed to process preference signals for %s", item_id)
+
+        # Publish for async case generation by consolidator
+        self.queue.publish(Message.create(
+            channel="preference_updates",
+            payload={
+                "work_item_id": item_id,
+                "action": "review_processed",
+                "verdict": verdict,
+                "feedback": feedback,
+            },
+            source=actor or "system",
+        ))
