@@ -6,6 +6,7 @@ import os
 import time
 
 import jwt
+from fastapi import HTTPException
 
 # Server-scoped signing key — generated once at import, lives in memory.
 # All sessions spawned by this server process can be validated.
@@ -31,3 +32,15 @@ def verify_session_token(token: str) -> dict:
     Raises jwt.InvalidTokenError on failure.
     """
     return jwt.decode(token, _SIGNING_KEY, algorithms=["HS256"])
+
+
+def authenticate(authorization: str | None) -> dict:
+    """Validate JWT and return claims. Raises HTTPException on failure."""
+    if not authorization:
+        raise HTTPException(status_code=401, detail="Missing Authorization header")
+
+    token = authorization.removeprefix("Bearer ").strip()
+    try:
+        return verify_session_token(token)
+    except jwt.InvalidTokenError as e:
+        raise HTTPException(status_code=401, detail=f"Invalid token: {e}")

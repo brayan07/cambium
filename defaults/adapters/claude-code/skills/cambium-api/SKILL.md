@@ -118,9 +118,145 @@ curl -s -X PATCH "$CAMBIUM_API_URL/sessions/SESSION_ID/metadata" \
 
 Keys are merged into existing metadata — you don't need to include the full metadata object.
 
+## Work Items
+
+Work items are the planning and execution backbone. The coordinator creates them, the planner decomposes them, executors claim and complete them, and the reviewer evaluates them. The service handles channel publishing and rollup automatically — **routines focus on decisions, not plumbing.**
+
+### Creating a work item
+
+```bash
+curl -s -X POST "$CAMBIUM_API_URL/work-items" \
+  -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer $CAMBIUM_TOKEN" \
+  -d '{
+    "title": "Research Python testing frameworks",
+    "description": "Compare pytest, unittest, and nose2 with recommendation",
+    "priority": 5
+  }'
+```
+
+### Decomposing into children (with dependency references)
+
+```bash
+curl -s -X POST "$CAMBIUM_API_URL/work-items/ITEM_ID/decompose" \
+  -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer $CAMBIUM_TOKEN" \
+  -d '{
+    "children": [
+      {"title": "Research pytest", "priority": 2},
+      {"title": "Research unittest", "priority": 1},
+      {"title": "Write comparison", "depends_on": ["$0", "$1"]}
+    ]
+  }'
+```
+
+`$0`, `$1` etc. reference siblings by position — the server resolves them to real IDs. Children with no unmet dependencies are automatically set to `ready` and published to the `tasks` channel.
+
+### Claiming a work item (executor)
+
+```bash
+curl -s -X POST "$CAMBIUM_API_URL/work-items/ITEM_ID/claim" \
+  -H "Authorization: Bearer $CAMBIUM_TOKEN"
+```
+
+Returns the claimed item or 409 if someone else got it first. Auth required — identity comes from the JWT.
+
+### Completing a work item
+
+```bash
+curl -s -X POST "$CAMBIUM_API_URL/work-items/ITEM_ID/complete" \
+  -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer $CAMBIUM_TOKEN" \
+  -d '{"result": "Comparison written to vault/research/python-testing.md"}'
+```
+
+Completing a child triggers automatic rollup — if all siblings are done (or any, for `completion_mode: any`), the parent auto-completes too. Dependencies are also resolved: items waiting on this one become `ready`.
+
+### Failing a work item
+
+```bash
+curl -s -X POST "$CAMBIUM_API_URL/work-items/ITEM_ID/fail" \
+  -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer $CAMBIUM_TOKEN" \
+  -d '{"error": "API rate limited, could not complete research"}'
+```
+
+If under `max_attempts`, the item goes back to `ready` for retry. Otherwise it's permanently failed and published to `plans` for replanning.
+
+### Reviewing a work item
+
+```bash
+curl -s -X POST "$CAMBIUM_API_URL/work-items/ITEM_ID/review" \
+  -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer $CAMBIUM_TOKEN" \
+  -d '{"verdict": "accepted"}'
+```
+
+Or reject with feedback:
+```bash
+curl -s -X POST "$CAMBIUM_API_URL/work-items/ITEM_ID/review" \
+  -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer $CAMBIUM_TOKEN" \
+  -d '{"verdict": "rejected", "feedback": "Missing comparison of test discovery mechanisms"}'
+```
+
+### Blocking / unblocking
+
+```bash
+curl -s -X POST "$CAMBIUM_API_URL/work-items/ITEM_ID/block" \
+  -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer $CAMBIUM_TOKEN" \
+  -d '{"reason": "Waiting for API key"}'
+
+curl -s -X POST "$CAMBIUM_API_URL/work-items/ITEM_ID/unblock" \
+  -H "Authorization: Bearer $CAMBIUM_TOKEN"
+```
+
+### Updating context
+
+```bash
+curl -s -X PATCH "$CAMBIUM_API_URL/work-items/ITEM_ID/context" \
+  -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer $CAMBIUM_TOKEN" \
+  -d '{"key": "value"}'
+```
+
+Keys are merged into existing context.
+
+### Querying
+
+```bash
+# Get a single item
+curl -s "$CAMBIUM_API_URL/work-items/ITEM_ID"
+
+# Get children
+curl -s "$CAMBIUM_API_URL/work-items/ITEM_ID/children"
+
+# Get full subtree
+curl -s "$CAMBIUM_API_URL/work-items/ITEM_ID/tree"
+
+# List by status
+curl -s "$CAMBIUM_API_URL/work-items?status=ready"
+
+# Event history for an item
+curl -s "$CAMBIUM_API_URL/work-items/ITEM_ID/events"
+
+# Global event log (for consolidator analysis)
+curl -s "$CAMBIUM_API_URL/work-items/events/all?event_type=status_changed&limit=50"
+```
+
+### Status lifecycle
+
+```
+pending → ready → active → completed
+                        → failed (retries if under max_attempts)
+                        → blocked → ready
+pending/ready/blocked/failed → canceled
+```
+
 ## Important
 
 - Always publish messages when your routine produces results that should trigger downstream processing.
 - Include enough context in the payload that downstream routines can act without re-reading everything.
-- You may publish multiple messages if your work produces multiple outputs (e.g., planner decomposes a goal into several tasks).
+- For planning and execution, **use the work item API** — the service handles channel publishing and cascading automatically.
 - Use `$CAMBIUM_API_URL` and `$CAMBIUM_TOKEN` — never hardcode the URL or token.

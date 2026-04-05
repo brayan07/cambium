@@ -149,4 +149,4 @@ class TestConsumerIntegration:
         results = server.consumer.tick()
         assert len(results) == 1
         assert results[0].success is True
-        assert server.queue.pending_count() == 0
+        assert server.queue.pending_count(["tasks"]) == 0

@@ -21,10 +21,13 @@ from cambium.models.routine import RoutineRegistry
 from cambium.models.skill import SkillRegistry
 from cambium.queue.sqlite import SQLiteQueue
 from cambium.runner.routine_runner import RoutineRunner
-from cambium.server.auth import verify_session_token
+from cambium.server.auth import authenticate, verify_session_token
 from cambium.server import sessions as sessions_module
+from cambium.server import work_items as work_items_module
 from cambium.session.broadcaster import BroadcasterRegistry
 from cambium.session.store import SessionStore
+from cambium.work_item.service import WorkItemService
+from cambium.work_item.store import WorkItemStore
 
 log = logging.getLogger(__name__)
 
@@ -123,16 +126,8 @@ def _get_routine_permissions(routine_name: str) -> tuple[list[str], list[str]]:
 
 
 def _authenticate(authorization: str | None) -> dict:
-    """Validate JWT and return claims. Raises HTTPException on failure."""
-    if not authorization:
-        raise HTTPException(status_code=401, detail="Missing Authorization header")
-
-    # Accept "Bearer <token>" or raw token
-    token = authorization.removeprefix("Bearer ").strip()
-    try:
-        return verify_session_token(token)
-    except jwt.InvalidTokenError as e:
-        raise HTTPException(status_code=401, detail=f"Invalid token: {e}")
+    """Validate JWT and return claims. Delegates to auth.authenticate."""
+    return authenticate(authorization)
 
 
 def build_server(
@@ -189,6 +184,17 @@ def build_server(
         user_dir=user_dir,
     )
 
+    # Work item store + service (separate DB)
+    if db_path == ":memory:":
+        wi_db_path = ":memory:"
+    else:
+        wi_db_path = str(Path(db_path).parent / "work_items.db")
+    work_item_store = WorkItemStore(wi_db_path)
+    work_item_service = WorkItemService(store=work_item_store, queue=queue)
+
+    # Configure work item endpoints
+    work_items_module.configure(service=work_item_service)
+
     # Configure session endpoints
     sessions_module.configure(
         session_store=session_store,
@@ -241,6 +247,7 @@ app = FastAPI(
 )
 
 app.include_router(sessions_module.router)
+app.include_router(work_items_module.router)
 
 
 def _get_server() -> CambiumServer:

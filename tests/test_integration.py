@@ -100,7 +100,7 @@ class TestEndToEnd:
         assert len(results) == 1
         assert results[0].success is True
         assert "coordinator" in results[0].output
-        assert queue.pending_count() == 0
+        assert queue.pending_count(["events"]) == 0
 
     def test_message_with_no_listener_stays_pending(self, tmp_path: Path):
         """Messages on channels nobody listens to stay in the queue."""
@@ -159,7 +159,7 @@ class TestEndToEnd:
         results = loop.tick()
         assert len(results) == 2
         assert all(r.success for r in results)
-        assert queue.pending_count() == 0
+        assert queue.pending_count(["events"]) == 0
 
 
 class TestCascade:
@@ -226,8 +226,8 @@ class TestCascade:
         assert len(results) == 1
         assert "reviewer" in results[0].output
 
-        # Queue fully drained
-        assert queue.pending_count() == 0
+        # Queue fully drained (excluding sessions_completed notifications)
+        assert queue.pending_count(["events", "tasks", "completions"]) == 0
 
     def test_cascade_with_broadcaster_cleanup(self, tmp_path: Path):
         """Each hop creates and cleans up its broadcaster."""
@@ -242,7 +242,7 @@ class TestCascade:
 
         # All broadcasters cleaned up
         assert broadcaster_reg.active_count() == 0
-        assert queue.pending_count() == 0
+        assert queue.pending_count(["events", "tasks", "completions"]) == 0
 
     def test_cascade_payload_propagation(self, tmp_path: Path):
         """Downstream routines receive context from upstream via payload."""

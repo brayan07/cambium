@@ -159,7 +159,8 @@ class ClaudeCodeAdapter(AdapterType):
                     continue
 
                 # Translate to TranscriptEvent and emit for persistence
-                if on_raw_event:
+                # Skip "result" events — they duplicate the final assistant message
+                if on_raw_event and parsed.get("type") != "result":
                     on_raw_event(_to_transcript_event(parsed))
 
                 # Translate to OpenAI chunks and emit
