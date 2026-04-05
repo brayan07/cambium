@@ -70,8 +70,8 @@ YAML-defined event handler. Binds a channel listener to an adapter instance. Rou
 # Example: executor.yaml
 name: executor
 adapter_instance: executor       # Which adapter config to use
-listen: [tasks, rejections]      # Channels to consume from
-publish: [completions]           # Channels allowed to emit to
+listen: [tasks]                  # Channels to consume from
+publish: [completions, input_needed]  # Channels allowed to emit to
 ```
 
 ### Adapter Instance
@@ -156,79 +156,98 @@ TranscriptEvent
 
 ## Channel Topology
 
-This is the pub/sub wiring between routines — the "nervous system" of the agent.
+Channels are **wake-up signals**, not context carriers. They contain minimal metadata (event type, entity key). The receiving routine looks up full context from the shared database. This keeps messages lightweight and the database as the single source of truth.
 
 ```mermaid
 graph LR
-    subgraph Inputs
-        sessions(["sessions"])
-        goals(["goals"])
-        feedback(["feedback"])
-        schedule(["schedule"])
+    subgraph External
+        ext(["events"])
     end
 
     subgraph Routines
+        coordinator["coordinator"]
         interlocutor["interlocutor"]
-        triager["triager"]
         planner["planner"]
         executor["executor"]
         reviewer["reviewer"]
-        reflector["reflector"]
+        consolidator["consolidator"]
     end
 
     subgraph Channels
         plans(["plans"])
         tasks(["tasks"])
         completions(["completions"])
-        reviews(["reviews"])
-        rejections(["rejections"])
+        evaluations(["evaluations"])
         reflections(["reflections"])
-        improvements(["improvements"])
+        sessions_completed(["sessions_completed"])
+        input_needed(["input_needed"])
     end
 
-    sessions --> interlocutor
-    interlocutor --> goals
-    interlocutor --> feedback
+    subgraph Data
+        input_store[("input_requests store")]
+    end
 
-    goals --> triager
-    feedback --> triager
-    schedule --> triager
-    triager --> plans
-    triager --> tasks
-    triager --> reflections
+    ext --> coordinator
+    evaluations --> coordinator
+    reflections --> coordinator
+
+    coordinator --> plans
+    coordinator --> tasks
+    coordinator --> events
+    coordinator --> input_needed
+
+    interlocutor -.->|can publish to any channel| plans
+    interlocutor -.-> tasks
+    interlocutor -.-> events
 
     plans --> planner
     planner --> tasks
+    planner --> input_needed
 
     tasks --> executor
-    rejections --> executor
     executor --> completions
+    executor --> input_needed
 
     completions --> reviewer
-    reviewer --> reviews
-    reviewer --> rejections
+    reviewer --> evaluations
 
-    reviews --> reflector
-    schedule --> reflector
-    reflections --> reflector
-    reflector --> improvements
+    sessions_completed --> consolidator
+    consolidator --> reflections
+
+    input_needed --> input_store
 ```
+
+### Design Principles
+
+- **Channels as wake-up signals.** Messages carry minimal payload (event type + entity key). Routines look up full context from the shared database. This avoids stale data in messages and keeps the database as the single source of truth.
+- **Event batching.** The coordinator accumulates events within a time window (~1 min) before processing. This prevents thrashing on rapid external updates (e.g., multiple ClickUp status changes in quick succession). The consolidator similarly batches completed session logs.
+- **Interlocutor = interactive coordinator.** The interlocutor has the same broad permissions as the coordinator — it can publish to any channel. The difference is the trigger: the coordinator wakes from external events, the interlocutor wakes from the user. Both can route work anywhere.
+- **User input authority split.** Only work-doing routines (coordinator, planner, executor) can request user input. Evaluating routines (reviewer, consolidator) must predict what the user would say based on past behavior, stated values, and feedback history — that's their job.
+- **`input_needed` is system-consumed.** No routine listens on `input_needed` — the system auto-persists these to the central `input_requests` store. The coordinator reads the store during batch processing to stay aware of pending input, avoiding a self-wake loop.
 
 ### Channel Reference
 
-| Channel | Producers | Consumers | Purpose |
+| Channel | Producers | Consumers | Payload |
 |---------|-----------|-----------|---------|
-| `sessions` | API / external | interlocutor | User-initiated conversations |
-| `goals` | interlocutor | triager | User's stated goals and intentions |
-| `feedback` | interlocutor | triager | User corrections, preferences, reactions |
-| `schedule` | external (cron) | triager, reflector | Time-based triggers |
-| `plans` | triager | planner | Work that needs decomposition |
-| `tasks` | triager, planner | executor | Concrete work items ready to run |
-| `completions` | executor | reviewer | Finished work awaiting quality check |
-| `reviews` | reviewer | reflector | Quality assessments of completed work |
-| `rejections` | reviewer | executor | Work sent back for revision |
-| `reflections` | triager | reflector | Signals to self-assess and improve |
-| `improvements` | reflector | *(consumed by user/future routines)* | Proposed changes to skills, prompts, config |
+| `events` | External (ClickUp, cron, user actions), coordinator | coordinator (batched) | Event type + entity key |
+| `plans` | coordinator, interlocutor | planner | Project key |
+| `tasks` | coordinator, planner, interlocutor | executor | Task key |
+| `completions` | executor | reviewer | Task key + output reference |
+| `evaluations` | reviewer | coordinator | Task key + verdict (accepted / rejected / changes_requested) |
+| `reflections` | consolidator | coordinator | Observation + evidence references |
+| `sessions_completed` | system (on session close) | consolidator | Session ID |
+| `input_needed` | coordinator, planner, executor | system (auto-persist to input_requests store) | Entity key + question + external location |
+
+### Routine Reference
+
+| Routine | Listens on | Publishes to | User input | Batching |
+|---------|-----------|-------------|------------|----------|
+| **coordinator** | `events`, `evaluations`, `reflections` | `plans`, `tasks`, `events`, `input_needed` | Yes (registers in store) | ~1 min window on `events` |
+| **interlocutor** | *(user session)* | any channel | Is the user interface | None — real-time |
+| **planner** | `plans` | `tasks`, `input_needed` | Yes (registers in store) | None |
+| **executor** | `tasks` | `completions`, `input_needed` | Yes (registers in store) | None |
+| **reviewer** | `completions` | `evaluations` | No — must predict | None |
+| **consolidator** | `sessions_completed` | `reflections` | No — must predict | Batches completed sessions |
 
 ## Data Flow: End to End
 
@@ -288,21 +307,21 @@ All user state lives in `~/.cambium/`, bootstrapped by `cambium init`.
 ├── mcp-servers.json                # MCP server registry (user-created, not seeded by init)
 │
 ├── routines/                       # Channel → adapter bindings
-│   ├── triager.yaml
+│   ├── coordinator.yaml
+│   ├── interlocutor.yaml
 │   ├── planner.yaml
 │   ├── executor.yaml
 │   ├── reviewer.yaml
-│   ├── reflector.yaml
-│   └── interlocutor.yaml
+│   └── consolidator.yaml
 │
 ├── adapters/
 │   └── claude-code/
 │       ├── instances/              # Adapter personalities
-│       │   ├── triager.yaml
+│       │   ├── coordinator.yaml
 │       │   ├── executor.yaml
 │       │   └── ...
 │       ├── prompts/                # System prompts per instance
-│       │   ├── triager.md
+│       │   ├── coordinator.md
 │       │   ├── executor.md
 │       │   └── ...
 │       └── skills/                 # Seeded with cambium-api; user adds custom skills here
@@ -383,7 +402,7 @@ Supports both `stdio` (command + args) and `remote` (url + headers) transports. 
 
 4. **TranscriptEvent as adapter-agnostic contract.** Each adapter translates its native stream format (Claude's stream-json, future adapters' formats) into TranscriptEvents. The runner persists them without inspecting content. Format-specific logic lives in the adapter, not the runner.
 
-5. **JWT-scoped permissions.** Each session gets a token encoding its routine name. When the agent publishes to a channel via `cambium-api`, the server verifies the routine is allowed to publish there. This prevents the triager from accidentally writing to `completions`.
+5. **JWT-scoped permissions.** Each session gets a token encoding its routine name. When the agent publishes to a channel via `cambium-api`, the server verifies the routine is allowed to publish there. This prevents the reviewer from accidentally writing to `plans`.
 
 6. **One-shot vs interactive sessions.** The consumer loop handles one-shot (fire-and-forget) execution. The session API handles interactive (multi-turn, SSE-observable) conversations. Same adapter, different lifecycle.
 
@@ -395,14 +414,17 @@ Supports both `stdio` (command + args) and `remote` (url + headers) transports. 
 - Channel-based pub/sub with JWT permissions
 - `cambium init` with GitHub backup option
 - Interactive sessions via API (SSE streaming)
-- 6 default routines (triager, planner, executor, reviewer, reflector, interlocutor)
+- 6 default routines (coordinator, interlocutor, planner, executor, reviewer, consolidator)
 
 ### In Progress
 - **Phase 2: Port Marcus** — replacing n8n + async-runner.py with Cambium's consumer loop
 - **ClickUp polling source** — native task ingestion (replacing n8n trigger)
 
 ### Not Yet Built
-- **Self-improvement loop** (Phase 4) — reflector proposes changes to skills/prompts; reviewer validates; staging environment tests before deploy
+- **Event batching** — coordinator and consolidator need time-windowed event accumulation (~1 min)
+- **Central input_requests store** — persistence layer for user input requests with external location pointers
+- **Consolidator** — background routine that digests session logs into shared memory and produces reflections
+- **Self-improvement loop** — consolidator produces reflections → coordinator creates plans → staging validates → deploy
 - **Skill testing / staging** — ephemeral environment to validate changes before promoting to production config
 - **Memory / knowledge layer** — `~/.cambium/knowledge/` directory exists but no framework integration
 - **Configuration hot-reload** — changes to routines/adapters/skills require server restart
@@ -416,32 +438,38 @@ The long-term vision. Not yet implemented, but the architecture is designed for 
 
 ```mermaid
 graph TD
-    User["User Session"] -->|feedback, goals| Triager
-    Schedule["Schedule (cron)"] --> Triager
-    Schedule -->|schedule| Reflector
-    Triager -->|plans| Planner
-    Triager -->|tasks| Executor
-    Triager -->|reflections| Reflector
+    Executor -->|completions| Reviewer
+    Reviewer -->|evaluations| Coordinator
+
+    Executor -->|sessions_completed| Consolidator
+    Planner -->|sessions_completed| Consolidator
+    Reviewer -->|sessions_completed| Consolidator
+
+    Consolidator -->|reflections| Coordinator
+    Coordinator -->|plans| Planner
 
     Planner -->|tasks| Executor
     Executor -->|completions| Reviewer
-    Reviewer -->|reviews| Reflector
-    Reviewer -->|rejections| Executor
 
-    Reflector -->|improvements| Staging["Staging / Test"]
-    Staging -->|passes| Deploy["Deploy to production<br/>(skills, prompts, config)"]
-    Staging -->|fails| Reflector
+    Coordinator -->|"plan (self-improvement)"| Planner
+    Planner -->|"task (apply change)"| Executor
+    Executor -->|completions| Reviewer
+
+    Reviewer -->|"evaluation (validate change)"| Coordinator
+    Coordinator -->|deploy| Production["Deploy to production<br/>(skills, prompts, config)"]
 ```
 
-The reflector:
-1. Receives reviews of completed work + scheduled self-assessment triggers
-2. Attributes outcomes to specific skills, prompts, or decisions
-3. Proposes concrete improvements (skill edits, prompt changes, config tweaks)
-4. Publishes to `improvements` channel
+The **sleep/wake cycle**:
+- **Wake** — the system does work: coordinator routes, planner decomposes, executor builds, reviewer evaluates.
+- **Sleep** — the consolidator digests completed session logs, consolidates into shared memory, and produces reflections: "we keep failing at X," "this skill underperforms on Y," "the user corrected Z three times."
 
-The staging environment:
-1. Creates ephemeral copy of current config
-2. Applies proposed improvement
-3. Runs automated validation (smoke tests, skill tests)
-4. If passes: creates PR for human review
-5. If fails: feeds failure data back to reflection
+The coordinator receives reflections and decides what to do — create a self-driven goal, plan an improvement, or do nothing. Self-driven goals are distinguished from user goals in the database but flow through the same planning and execution pipeline.
+
+**Improvement lifecycle:**
+1. Consolidator observes a pattern across sessions → publishes reflection
+2. Coordinator creates a plan for the improvement (self-driven goal)
+3. Planner decomposes into tasks (e.g., edit a skill, adjust a prompt)
+4. Executor applies the change in a staging environment
+5. Reviewer validates the change against user values and past behavior
+6. If accepted: coordinator deploys to production config
+7. If rejected: feedback loops back through the same pipeline
