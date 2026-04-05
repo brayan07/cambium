@@ -100,19 +100,19 @@ class AdapterType(ABC):
         """
         ...
 
-    def launch_interactive(
+    def attach(
         self,
         instance: AdapterInstance,
         session_id: str,
         cwd: Path | None = None,
     ) -> None:
-        """Launch the adapter's native interactive experience.
+        """Attach to a live session.
 
         Typically execs into the adapter's CLI (e.g. claude, codex).
         This replaces the current process — it does not return.
 
-        Raises NotImplementedError if the adapter doesn't support interactive mode.
+        Raises NotImplementedError if the adapter doesn't support attach mode.
         """
         raise NotImplementedError(
-            f"Adapter type '{self.name}' does not support interactive chat"
+            f"Adapter type '{self.name}' does not support attach"
         )

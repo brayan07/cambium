@@ -39,7 +39,7 @@ These are the channels in the system. Your routine can only publish to a subset 
 | `rejections` | Work rejected by review with feedback |
 | `reflections` | Triggers for self-evaluation |
 | `improvements` | Proposed skill/routine improvements |
-| `sessions` | User session events |
+
 
 ## Checking Your Permissions
 

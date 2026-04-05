@@ -60,7 +60,7 @@ class TestCreateSession:
         resp = client.post("/sessions", json={"routine_name": "handler"})
         assert resp.status_code == 201
         data = resp.json()
-        assert data["type"] == "interactive"
+        assert data["origin"] == "user"
         assert data["status"] == "created"
         assert data["routine_name"] == "handler"
         assert len(data["id"]) == 36

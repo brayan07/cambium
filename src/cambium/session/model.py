@@ -23,9 +23,9 @@ class TranscriptEvent:
     raw: dict = field(default_factory=dict)  # full original event, opaque to runner
 
 
-class SessionType(str, Enum):
-    ONE_SHOT = "one_shot"
-    INTERACTIVE = "interactive"
+class SessionOrigin(str, Enum):
+    SYSTEM = "system"
+    USER = "user"
 
 
 class SessionStatus(str, Enum):
@@ -38,7 +38,7 @@ class SessionStatus(str, Enum):
 @dataclass
 class Session:
     id: str
-    type: SessionType
+    origin: SessionOrigin
     status: SessionStatus
     routine_name: str | None = None
     adapter_instance_name: str | None = None
@@ -49,7 +49,7 @@ class Session:
     @classmethod
     def create(
         cls,
-        session_type: SessionType,
+        origin: SessionOrigin,
         routine_name: str | None = None,
         adapter_instance_name: str | None = None,
         metadata: dict[str, Any] | None = None,
@@ -57,7 +57,7 @@ class Session:
         now = datetime.now(timezone.utc).isoformat()
         return cls(
             id=str(uuid.uuid4()),
-            type=session_type,
+            origin=origin,
             status=SessionStatus.CREATED,
             routine_name=routine_name,
             adapter_instance_name=adapter_instance_name,

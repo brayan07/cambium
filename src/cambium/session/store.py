@@ -6,7 +6,7 @@ import json
 import sqlite3
 from typing import Any
 
-from cambium.session.model import Session, SessionMessage, SessionStatus, SessionType
+from cambium.session.model import Session, SessionMessage, SessionOrigin, SessionStatus
 
 
 class SessionStore:
@@ -21,7 +21,7 @@ class SessionStore:
         self._conn.executescript("""
             CREATE TABLE IF NOT EXISTS sessions (
                 id TEXT PRIMARY KEY,
-                type TEXT NOT NULL,
+                origin TEXT NOT NULL,
                 status TEXT NOT NULL DEFAULT 'created',
                 routine_name TEXT,
                 adapter_instance_name TEXT,
@@ -49,12 +49,12 @@ class SessionStore:
 
     def create_session(self, session: Session) -> None:
         self._conn.execute(
-            "INSERT INTO sessions (id, type, status, routine_name, "
+            "INSERT INTO sessions (id, origin, status, routine_name, "
             "adapter_instance_name, created_at, updated_at, metadata) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 session.id,
-                session.type.value,
+                session.origin.value,
                 session.status.value,
                 session.routine_name,
                 session.adapter_instance_name,
@@ -67,7 +67,7 @@ class SessionStore:
 
     def get_session(self, session_id: str) -> Session | None:
         row = self._conn.execute(
-            "SELECT id, type, status, routine_name, adapter_instance_name, "
+            "SELECT id, origin, status, routine_name, adapter_instance_name, "
             "created_at, updated_at, metadata FROM sessions WHERE id = ?",
             (session_id,),
         ).fetchone()
@@ -75,7 +75,7 @@ class SessionStore:
             return None
         return Session(
             id=row[0],
-            type=SessionType(row[1]),
+            origin=SessionOrigin(row[1]),
             status=SessionStatus(row[2]),
             routine_name=row[3],
             adapter_instance_name=row[4],
@@ -97,18 +97,18 @@ class SessionStore:
     def list_sessions(
         self,
         status: SessionStatus | None = None,
-        session_type: SessionType | None = None,
+        origin: SessionOrigin | None = None,
         limit: int = 50,
     ) -> list[Session]:
-        query = "SELECT id, type, status, routine_name, adapter_instance_name, created_at, updated_at, metadata FROM sessions"
+        query = "SELECT id, origin, status, routine_name, adapter_instance_name, created_at, updated_at, metadata FROM sessions"
         conditions: list[str] = []
         params: list[Any] = []
         if status is not None:
             conditions.append("status = ?")
             params.append(status.value)
-        if session_type is not None:
-            conditions.append("type = ?")
-            params.append(session_type.value)
+        if origin is not None:
+            conditions.append("origin = ?")
+            params.append(origin.value)
         if conditions:
             query += " WHERE " + " AND ".join(conditions)
         query += " ORDER BY created_at DESC LIMIT ?"
@@ -118,7 +118,7 @@ class SessionStore:
         return [
             Session(
                 id=r[0],
-                type=SessionType(r[1]),
+                origin=SessionOrigin(r[1]),
                 status=SessionStatus(r[2]),
                 routine_name=r[3],
                 adapter_instance_name=r[4],

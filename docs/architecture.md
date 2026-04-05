@@ -100,34 +100,36 @@ AdapterType (ABC)
 │   Callbacks:
 │   ├── on_event(chunk)        # OpenAI-format SSE chunks → broadcaster
 │   └── on_raw_event(event)    # TranscriptEvent → session store
-└── launch_interactive(instance, session_id, cwd)  # exec into CLI
+└── attach(instance, session_id, cwd)  # exec into live session
 ```
 
 ### Session
 
-Tracks a single execution context. Two types:
+The universal execution context. Every routine creates sessions — there is no separate concept of "conversations" vs "routine runs." Any session can be observed (read its transcript) or joined (send messages into it) by the user.
 
-| Type | Created by | Lifecycle |
-|------|-----------|-----------|
-| ONE_SHOT | Consumer loop | Message arrives → session created (ACTIVE) → adapter runs → COMPLETED/FAILED |
-| INTERACTIVE | Session API | Client creates → sends messages → observes via SSE → closes |
+Sessions track **origin** (who started it), not interaction mode:
+
+| Origin | Created by | Examples |
+|--------|-----------|----------|
+| `system` | Consumer loop | Coordinator batches events, executor runs a task, reviewer evaluates work |
+| `user` | Session API (interlocutor) | User starts a conversation, user drops into an executor session |
 
 ```mermaid
 stateDiagram-v2
     [*] --> CREATED
-    CREATED --> ACTIVE: one-shot: immediate / interactive: first message
+    CREATED --> ACTIVE: system: immediate / user: first message
     ACTIVE --> COMPLETED: success
     ACTIVE --> FAILED: error / max retries
     COMPLETED --> [*]
     FAILED --> [*]
 
-    note right of CREATED: One-shot sessions skip CREATED —\nstored directly as ACTIVE.\nInteractive sessions persist CREATED\nuntil first message.
+    note right of CREATED: System-origin sessions skip CREATED —\nstored directly as ACTIVE.\nUser-origin sessions persist CREATED\nuntil first message.
 ```
 
 ```
 Session
 ├── id: str               # Generated from uuid4()
-├── type: ONE_SHOT | INTERACTIVE
+├── origin: system | user
 ├── status: CREATED → ACTIVE → COMPLETED | FAILED
 ├── routine_name, adapter_instance_name
 ├── metadata: dict        # Arbitrary session metadata
@@ -135,6 +137,11 @@ Session
 ```
 
 Note: `working_dir` (`~/.cambium/data/sessions/{id}/`) is computed at runtime by the RoutineRunner, not stored on the Session model. Messages are stored separately in the `session_messages` table via `SessionStore`.
+
+The **interlocutor** is the user's portal to the session system. It doesn't listen on any channel — it's activated directly through the Session API. Through it, the user can:
+- Start new sessions with any routine
+- Join or observe existing sessions (including long-lived executor sessions)
+- Publish to any channel to delegate work
 
 ### Skill
 
@@ -243,7 +250,7 @@ graph LR
 | Routine | Listens on | Publishes to | User input | Batching |
 |---------|-----------|-------------|------------|----------|
 | **coordinator** | `events`, `evaluations`, `reflections` | `plans`, `tasks`, `events`, `input_needed` | Yes (registers in store) | ~1 min window on `events` |
-| **interlocutor** | *(user session)* | any channel | Is the user interface | None — real-time |
+| **interlocutor** | *(API-driven, no channels)* | any channel | Is the user interface | None — real-time |
 | **planner** | `plans` | `tasks`, `input_needed` | Yes (registers in store) | None |
 | **executor** | `tasks` | `completions`, `input_needed` | Yes (registers in store) | None |
 | **reviewer** | `completions` | `evaluations` | No — must predict | None |
@@ -385,9 +392,9 @@ Supports both `stdio` (command + args) and `remote` (url + headers) transports. 
 
 | Endpoint | Method | Purpose |
 |----------|--------|---------|
-| `/sessions` | POST | Create interactive session |
+| `/sessions` | POST | Create session (user origin) |
 | `/sessions/{id}/messages` | POST | Send message → SSE stream response |
-| `/sessions/{id}/messages` | GET | Conversation history |
+| `/sessions/{id}/messages` | GET | Session transcript |
 | `/sessions/{id}` | GET | Session metadata |
 | `/sessions/{id}/stream` | GET | Observe running session (SSE) |
 | `/sessions/{id}` | DELETE | End session |
@@ -404,7 +411,7 @@ Supports both `stdio` (command + args) and `remote` (url + headers) transports. 
 
 5. **JWT-scoped permissions.** Each session gets a token encoding its routine name. When the agent publishes to a channel via `cambium-api`, the server verifies the routine is allowed to publish there. This prevents the reviewer from accidentally writing to `plans`.
 
-6. **One-shot vs interactive sessions.** The consumer loop handles one-shot (fire-and-forget) execution. The session API handles interactive (multi-turn, SSE-observable) conversations. Same adapter, different lifecycle.
+6. **Unified session model.** Every routine creates sessions. Sessions track origin (system or user), not interaction mode. Any session can be observed or joined by the user through the Session API. The interlocutor is the user's portal — API-driven, no channel subscription.
 
 ## Current State & Gaps
 
@@ -413,7 +420,7 @@ Supports both `stdio` (command + args) and `remote` (url + headers) transports. 
 - Claude Code adapter with skills, MCP passthrough, transcript storage
 - Channel-based pub/sub with JWT permissions
 - `cambium init` with GitHub backup option
-- Interactive sessions via API (SSE streaming)
+- Unified session model with origin tracking (system/user) and SSE streaming
 - 6 default routines (coordinator, interlocutor, planner, executor, reviewer, consolidator)
 
 ### In Progress

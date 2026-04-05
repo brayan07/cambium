@@ -15,7 +15,7 @@ from cambium.adapters.base import AdapterInstanceRegistry, AdapterType, RunResul
 from cambium.models.message import Message
 from cambium.models.routine import Routine
 from cambium.server.auth import create_session_token
-from cambium.session.model import Session, SessionMessage, SessionStatus, SessionType, TranscriptEvent
+from cambium.session.model import Session, SessionMessage, SessionOrigin, SessionStatus, TranscriptEvent
 from cambium.session.store import SessionStore
 
 
@@ -79,7 +79,7 @@ class RoutineRunner:
 
         if self.session_store and is_new_session:
             session = Session.create(
-                session_type=SessionType.ONE_SHOT,
+                origin=SessionOrigin.SYSTEM,
                 routine_name=routine.name,
                 adapter_instance_name=routine.adapter_instance,
                 metadata={"trigger_channel": message.channel, "trigger_message_id": message.id} if message else {},

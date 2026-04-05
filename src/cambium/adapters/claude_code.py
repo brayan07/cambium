@@ -291,10 +291,10 @@ class ClaudeCodeAdapter(AdapterType):
             return path.read_text()
         return ""
 
-    def launch_interactive(
+    def attach(
         self, instance: AdapterInstance, session_id: str, cwd: Path | None = None,
     ) -> None:
-        """Launch Claude Code in interactive mode.
+        """Attach to a Claude Code session.
 
         Builds the skills directory and system prompt, then execs into
         the ``claude`` CLI. This replaces the current process.
@@ -329,7 +329,7 @@ class ClaudeCodeAdapter(AdapterType):
         ]
 
         log.info(
-            f"Launching interactive session '{session_id[:8]}' "
+            f"Attaching to session '{session_id[:8]}' "
             f"instance='{instance.name}' model={model}"
         )
 

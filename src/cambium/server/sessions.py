@@ -11,7 +11,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from cambium.session.model import Session, SessionStatus, SessionType
+from cambium.session.model import Session, SessionOrigin, SessionStatus
 
 log = logging.getLogger(__name__)
 
@@ -29,7 +29,7 @@ class CreateSessionRequest(BaseModel):
 
 class SessionResponse(BaseModel):
     id: str
-    type: str
+    origin: str
     status: str
     routine_name: str | None
     adapter_instance_name: str | None
@@ -91,14 +91,14 @@ def create_session(body: CreateSessionRequest):
     adapter_instance_name = body.adapter_instance_name or routine.adapter_instance
 
     session = Session.create(
-        session_type=SessionType.INTERACTIVE,
+        origin=SessionOrigin.USER,
         routine_name=body.routine_name,
         adapter_instance_name=adapter_instance_name,
         metadata=body.metadata,
     )
     store.create_session(session)
 
-    log.info(f"Created interactive session {session.id[:8]} for routine '{body.routine_name}'")
+    log.info(f"Created user session {session.id[:8]} for routine '{body.routine_name}'")
     return _session_to_response(session)
 
 
@@ -263,7 +263,7 @@ def delete_session(session_id: str):
 def _session_to_response(session: Session) -> SessionResponse:
     return SessionResponse(
         id=session.id,
-        type=session.type.value,
+        origin=session.origin.value,
         status=session.status.value,
         routine_name=session.routine_name,
         adapter_instance_name=session.adapter_instance_name,

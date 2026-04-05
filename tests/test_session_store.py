@@ -1,6 +1,6 @@
 """Tests for session store."""
 
-from cambium.session.model import Session, SessionMessage, SessionStatus, SessionType
+from cambium.session.model import Session, SessionMessage, SessionStatus, SessionOrigin
 from cambium.session.store import SessionStore
 
 
@@ -8,7 +8,7 @@ class TestSessionStore:
     def test_create_and_get_session(self):
         store = SessionStore()
         session = Session.create(
-            session_type=SessionType.INTERACTIVE,
+            origin=SessionOrigin.USER,
             routine_name="interlocutor",
             adapter_instance_name="interlocutor",
         )
@@ -16,7 +16,7 @@ class TestSessionStore:
         got = store.get_session(session.id)
         assert got is not None
         assert got.id == session.id
-        assert got.type == SessionType.INTERACTIVE
+        assert got.origin == SessionOrigin.USER
         assert got.status == SessionStatus.CREATED
         assert got.routine_name == "interlocutor"
 
@@ -26,7 +26,7 @@ class TestSessionStore:
 
     def test_update_status(self):
         store = SessionStore()
-        session = Session.create(session_type=SessionType.ONE_SHOT)
+        session = Session.create(origin=SessionOrigin.SYSTEM)
         store.create_session(session)
 
         store.update_status(session.id, SessionStatus.ACTIVE)
@@ -40,24 +40,24 @@ class TestSessionStore:
     def test_list_sessions(self):
         store = SessionStore()
         for i in range(3):
-            s = Session.create(session_type=SessionType.ONE_SHOT, routine_name=f"r{i}")
+            s = Session.create(origin=SessionOrigin.SYSTEM, routine_name=f"r{i}")
             store.create_session(s)
-        s = Session.create(session_type=SessionType.INTERACTIVE)
+        s = Session.create(origin=SessionOrigin.USER)
         store.create_session(s)
 
         all_sessions = store.list_sessions()
         assert len(all_sessions) == 4
 
-        one_shots = store.list_sessions(session_type=SessionType.ONE_SHOT)
-        assert len(one_shots) == 3
+        system_sessions = store.list_sessions(origin=SessionOrigin.SYSTEM)
+        assert len(system_sessions) == 3
 
-        interactive = store.list_sessions(session_type=SessionType.INTERACTIVE)
-        assert len(interactive) == 1
+        user_sessions = store.list_sessions(origin=SessionOrigin.USER)
+        assert len(user_sessions) == 1
 
     def test_list_sessions_by_status(self):
         store = SessionStore()
-        s1 = Session.create(session_type=SessionType.ONE_SHOT)
-        s2 = Session.create(session_type=SessionType.ONE_SHOT)
+        s1 = Session.create(origin=SessionOrigin.SYSTEM)
+        s2 = Session.create(origin=SessionOrigin.SYSTEM)
         store.create_session(s1)
         store.create_session(s2)
         store.update_status(s1.id, SessionStatus.COMPLETED)
@@ -69,14 +69,14 @@ class TestSessionStore:
     def test_list_sessions_limit(self):
         store = SessionStore()
         for _ in range(10):
-            store.create_session(Session.create(session_type=SessionType.ONE_SHOT))
+            store.create_session(Session.create(origin=SessionOrigin.SYSTEM))
         assert len(store.list_sessions(limit=3)) == 3
 
 
 class TestSessionMessages:
     def test_add_and_get_messages(self):
         store = SessionStore()
-        session = Session.create(session_type=SessionType.INTERACTIVE)
+        session = Session.create(origin=SessionOrigin.USER)
         store.create_session(session)
 
         m1 = SessionMessage.create(session.id, "user", "Hello", sequence=0)
@@ -93,7 +93,7 @@ class TestSessionMessages:
 
     def test_get_messages_after_sequence(self):
         store = SessionStore()
-        session = Session.create(session_type=SessionType.INTERACTIVE)
+        session = Session.create(origin=SessionOrigin.USER)
         store.create_session(session)
 
         for i in range(5):
@@ -108,7 +108,7 @@ class TestSessionMessages:
 
     def test_next_sequence(self):
         store = SessionStore()
-        session = Session.create(session_type=SessionType.INTERACTIVE)
+        session = Session.create(origin=SessionOrigin.USER)
         store.create_session(session)
 
         assert store.next_sequence(session.id) == 0
@@ -121,7 +121,7 @@ class TestSessionMessages:
 
     def test_messages_ordered_by_sequence(self):
         store = SessionStore()
-        session = Session.create(session_type=SessionType.INTERACTIVE)
+        session = Session.create(origin=SessionOrigin.USER)
         store.create_session(session)
 
         # Insert out of order
@@ -135,7 +135,7 @@ class TestSessionMessages:
     def test_metadata_persisted(self):
         store = SessionStore()
         session = Session.create(
-            session_type=SessionType.ONE_SHOT,
+            origin=SessionOrigin.SYSTEM,
             metadata={"trigger_message_id": "abc-123"},
         )
         store.create_session(session)

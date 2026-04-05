@@ -23,6 +23,9 @@ class TestSeedlingRoutines:
     def test_listen_populated(self) -> None:
         registry = RoutineRegistry(ROUTINES_DIR)
         for routine in registry.all():
+            if routine.name == "interlocutor":
+                # Interlocutor is API-driven — no listen channels by design
+                continue
             assert len(routine.listen) > 0, f"{routine.name} has no channel subscriptions"
 
     def test_publish_populated(self) -> None:
@@ -48,7 +51,7 @@ class TestSeedlingRoutines:
         registry = RoutineRegistry(ROUTINES_DIR)
         interlocutor = registry.get("interlocutor")
         assert interlocutor is not None
-        assert "sessions" in interlocutor.listen
+        assert interlocutor.listen == []
 
     def test_channel_cascade_coverage(self) -> None:
         """Verify that published channels have listeners (no dead-letter messages)."""
@@ -58,7 +61,7 @@ class TestSeedlingRoutines:
         for r in registry.all():
             all_published.update(r.publish)
         # External/system-consumed channels don't need internal listeners
-        external = {"schedule", "sessions", "reflections", "input_needed"}
+        external = {"schedule", "reflections", "input_needed"}
         internal_published = all_published - external
         unhandled = internal_published - all_listened
         assert not unhandled, f"Published channels with no listener: {unhandled}"
