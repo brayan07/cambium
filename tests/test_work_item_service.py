@@ -322,6 +322,11 @@ class TestReview:
         got = store.get(item.id)
         assert got.context["rejection_feedback"] == "Not good enough"
 
+        # Regression: status_forced event must have reason "review_rejection"
+        forced = store.get_events(item.id, event_type="status_forced")
+        assert len(forced) == 1
+        assert forced[0].data["reason"] == "review_rejection"
+
     def test_invalid_verdict_raises(self):
         service, _, queue = _make_service()
         item = service.create_item(title="Item")
@@ -395,6 +400,53 @@ class TestCancelWithRollup:
 
         msgs = queue.consume(["plans"], limit=10)
         assert any(m.payload.get("action") == "canceled" for m in msgs)
+
+
+class TestMarkReady:
+    def test_mark_ready_transitions_pending_to_ready(self):
+        service, store, queue = _make_service()
+        item = service.create_item(title="Atomic task", actor="coordinator")
+        _drain(queue, ["plans"])
+
+        result = service.mark_ready(item.id, actor="planner")
+
+        assert result.status == WorkItemStatus.READY
+        assert store.get(item.id).status == WorkItemStatus.READY
+
+        # Should publish to tasks channel
+        msgs = queue.consume(["tasks"], limit=10)
+        assert len(msgs) == 1
+        assert msgs[0].payload["action"] == "ready"
+        assert msgs[0].payload["work_item_id"] == item.id
+
+    def test_mark_ready_nonexistent_raises(self):
+        service, _, _ = _make_service()
+        with pytest.raises(ValueError, match="not found"):
+            service.mark_ready("ghost", actor="planner")
+
+    def test_mark_ready_preserves_parent_id(self):
+        service, store, queue = _make_service()
+        parent = service.create_item(title="Parent")
+        _drain(queue, ["plans"])
+
+        # Create a child via decompose with a dependency so it stays pending
+        _, children = service.decompose(
+            parent.id,
+            [{"title": "Dep"}, {"title": "Atomic child", "depends_on": ["$0"]}],
+        )
+        _drain(queue, ["tasks"])
+
+        # Complete and review the dep to unblock the child
+        service.claim_item(children[0].id, session_id="s1", actor="executor")
+        service.complete_item(children[0].id, "done")
+        _drain(queue, ["completions"])
+        service.review_item(children[0].id, "accepted", actor="reviewer")
+        _drain(queue, ["tasks"])
+
+        # The child should now be ready with parent_id preserved
+        child = store.get(children[1].id)
+        assert child.status == WorkItemStatus.READY
+        assert child.parent_id == parent.id
 
 
 class TestBlockUnblock:

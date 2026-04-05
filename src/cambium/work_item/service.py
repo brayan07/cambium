@@ -230,6 +230,31 @@ class WorkItemService:
 
         return self.store.get(item_id)
 
+    def mark_ready(
+        self,
+        item_id: str,
+        actor: str | None = None,
+        session_id: str | None = None,
+    ) -> WorkItem:
+        """Transition a pending item directly to ready, skipping decomposition."""
+        item = self.store.get(item_id)
+        if item is None:
+            raise ValueError(f"Work item {item_id} not found")
+        self.store.update_status(
+            item_id, WorkItemStatus.READY, actor=actor, session_id=session_id
+        )
+        self.queue.publish(Message.create(
+            channel="tasks",
+            payload={
+                "work_item_id": item_id,
+                "action": "ready",
+                "title": item.title,
+                "parent_id": item.parent_id,
+            },
+            source=actor or "system",
+        ))
+        return self.store.get(item_id)
+
     def claim_item(
         self,
         item_id: str,
@@ -382,15 +407,8 @@ class WorkItemService:
                 parent.id, reviewed_by="auto_rollup",
                 actor=actor, session_id=session_id,
             )
-            self.queue.publish(Message.create(
-                channel="plans",
-                payload={
-                    "work_item_id": parent.id,
-                    "action": "auto_completed",
-                    "child_count": len(reviewed),
-                },
-                source=actor or "system",
-            ))
+            # No publish to plans — auto_completed parents need no planning.
+            # The status change is already recorded in the event log.
             # Recurse up
             self._run_rollup(
                 parent.id, actor=actor, session_id=session_id, depth=depth + 1

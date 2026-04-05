@@ -211,6 +211,9 @@ class TestFullWorkItemLifecycle:
         assert "created" in event_types
         assert "children_created" in event_types
         assert "status_forced" in event_types  # auto-rollup
+        # Regression: auto-rollup must label reason as "auto_rollup", not "review_rejection"
+        forced_events = [e for e in root_events if e["event_type"] == "status_forced"]
+        assert any(e["data"]["reason"] == "auto_rollup" for e in forced_events)
         assert "reviewed" in event_types  # auto-rollup review
 
     def test_fail_retry_cycle(self, client: TestClient):

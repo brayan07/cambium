@@ -135,6 +135,19 @@ class TestDecompose:
         assert resp.status_code == 404
 
 
+class TestMarkReady:
+    def test_mark_ready(self, client: TestClient):
+        item = client.post("/work-items", json={"title": "Atomic task"}).json()
+
+        resp = client.post(f"/work-items/{item['id']}/ready")
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "ready"
+
+    def test_mark_ready_nonexistent(self, client: TestClient):
+        resp = client.post("/work-items/nonexistent/ready")
+        assert resp.status_code == 400
+
+
 class TestClaim:
     def test_claim_requires_auth(self, client: TestClient):
         parent = client.post("/work-items", json={"title": "P"}).json()

@@ -211,6 +211,21 @@ def decompose_work_item(
     )
 
 
+@router.post("/{item_id}/ready", response_model=WorkItemResponse)
+def mark_ready(
+    item_id: str,
+    authorization: str | None = Header(default=None),
+):
+    """Mark an atomic task as directly executable, skipping decomposition."""
+    service = _get_service()
+    actor, session_id = _extract_identity(authorization)
+    try:
+        item = service.mark_ready(item_id, actor=actor, session_id=session_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return _item_to_response(item)
+
+
 @router.post("/{item_id}/claim", response_model=WorkItemResponse)
 def claim_work_item(
     item_id: str,
