@@ -39,8 +39,6 @@ class ClaudeCodeAdapter(AdapterType):
         self.skill_registry = skill_registry
         self.user_dir = user_dir
         self.mcp_registry = mcp_registry
-        # Track which sessions have been started (for --resume logic)
-        self._active_sessions: set[str] = set()
 
     def send_message(
         self,
@@ -53,12 +51,13 @@ class ClaudeCodeAdapter(AdapterType):
         on_event: Callable[[dict[str, Any]], None] | None = None,
         on_raw_event: Callable[[TranscriptEvent], None] | None = None,
         cwd: Path | None = None,
+        resume: bool = False,
     ) -> RunResult:
         if not live:
             return self._mock_send(instance, user_message, session_id, on_event)
         return self._live_send(
             instance, user_message, session_id, session_token, api_base_url,
-            on_event, on_raw_event, cwd,
+            on_event, on_raw_event, cwd, resume,
         )
 
     def _mock_send(
@@ -84,6 +83,7 @@ class ClaudeCodeAdapter(AdapterType):
         on_event: Callable[[dict[str, Any]], None] | None = None,
         on_raw_event: Callable[[TranscriptEvent], None] | None = None,
         cwd: Path | None = None,
+        resume: bool = False,
     ) -> RunResult:
         start = time.monotonic()
         tmp_dir = None
@@ -108,7 +108,6 @@ class ClaudeCodeAdapter(AdapterType):
 
             model = config.get("model", "opus")
             timeout = config.get("timeout", 1200)
-            is_resume = session_id in self._active_sessions
 
             cmd = [
                 "claude",
@@ -121,7 +120,7 @@ class ClaudeCodeAdapter(AdapterType):
                 "--append-system-prompt-file", str(prompt_file),
             ]
 
-            if is_resume:
+            if resume:
                 cmd.extend(["--resume", session_id])
             else:
                 cmd.extend(["--session-id", session_id])
@@ -131,7 +130,7 @@ class ClaudeCodeAdapter(AdapterType):
             env["CAMBIUM_API_URL"] = api_base_url
 
             log.info(
-                f"{'Resuming' if is_resume else 'Starting'} session '{session_id[:8]}' "
+                f"{'Resuming' if resume else 'Starting'} session '{session_id[:8]}' "
                 f"instance='{instance.name}' model={model} skills={len(skill_names)}"
             )
 
@@ -158,10 +157,6 @@ class ClaudeCodeAdapter(AdapterType):
                 parsed = _parse_stream_line(line)
                 if not parsed:
                     continue
-
-                # Extract session_id from init event
-                if parsed.get("type") == "system" and parsed.get("subtype") == "init":
-                    self._active_sessions.add(session_id)
 
                 # Translate to TranscriptEvent and emit for persistence
                 if on_raw_event:
@@ -204,7 +199,6 @@ class ClaudeCodeAdapter(AdapterType):
                 on_event(_make_done_chunk(chunk_id, model))
 
             if proc.returncode == 0:
-                self._active_sessions.add(session_id)
                 return RunResult(
                     success=True,
                     output=last_text,

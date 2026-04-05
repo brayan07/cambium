@@ -15,7 +15,8 @@ class FakeAdapter(AdapterType):
         self.last_call = None
 
     def send_message(self, instance, user_message, session_id, session_token="",
-                     api_base_url="", live=True, on_event=None, on_raw_event=None, cwd=None):
+                     api_base_url="", live=True, on_event=None, on_raw_event=None,
+                     cwd=None, resume=False):
         self.last_call = {
             "instance": instance,
             "user_message": user_message,
@@ -23,6 +24,7 @@ class FakeAdapter(AdapterType):
             "token": session_token,
             "api_url": api_base_url,
             "cwd": cwd,
+            "resume": resume,
         }
         return RunResult(success=True, output=f"[fake] ran {instance.name}",
                          session_id=session_id)
@@ -187,6 +189,9 @@ class TestRoutineRunner:
         messages = store.get_messages(session.id)
         assert any(m.content == "follow-up question" for m in messages)
 
+        # Adapter should have been told to resume
+        assert adapter.last_call["resume"] is True
+
     def test_failed_session_reactivated_on_new_message(self, tmp_path: Path):
         from cambium.session.model import Session, SessionOrigin, SessionStatus
         from cambium.session.store import SessionStore
@@ -208,6 +213,20 @@ class TestRoutineRunner:
             routine, session_id=session.id, user_message="retry",
         )
         assert result.success is True
+        assert adapter.last_call["resume"] is True
+
+    def test_new_session_does_not_resume(self, tmp_path: Path):
+        from cambium.session.store import SessionStore
+
+        runner, adapter = self._make_runner(tmp_path)
+        runner.session_store = SessionStore()
+
+        routine = Routine(name="coordinator", adapter_instance="coordinator", listen=["events"])
+        msg = Message.create(channel="events", payload={"goal": "test"}, source="test")
+
+        result = runner.send_message(routine, msg)
+        assert result.success is True
+        assert adapter.last_call["resume"] is False
 
     def test_resume_session_with_existing_id(self, tmp_path: Path):
         runner, adapter = self._make_runner(tmp_path)

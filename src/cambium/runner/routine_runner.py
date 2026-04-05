@@ -73,6 +73,7 @@ class RoutineRunner:
             )
 
         # Create or reuse session
+        resume = False
         if session_id is None:
             session_id = str(uuid.uuid4())
 
@@ -92,6 +93,12 @@ class RoutineRunner:
             elif existing.status in (SessionStatus.CREATED, SessionStatus.COMPLETED, SessionStatus.FAILED):
                 # Activate: new interactive session, or reopened completed/failed session
                 self.session_store.update_status(session_id, SessionStatus.ACTIVE)
+                # Resume if the session has prior messages (not just CREATED with no history)
+                if existing.status in (SessionStatus.COMPLETED, SessionStatus.FAILED):
+                    resume = True
+            elif existing.status == SessionStatus.ACTIVE:
+                # Already active (e.g., second message in interactive session)
+                resume = True
 
         # Issue session token
         token = create_session_token(routine.name, session_id)
@@ -145,6 +152,7 @@ class RoutineRunner:
             on_event=on_event,
             on_raw_event=on_raw_event,
             cwd=session_dir,
+            resume=resume,
         )
 
         # If no raw events were captured but we have output, store it as a

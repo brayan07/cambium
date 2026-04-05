@@ -15,7 +15,8 @@ class FakeAdapter(AdapterType):
     name = "fake"
 
     def send_message(self, instance, user_message, session_id, session_token="",
-                     api_base_url="", live=True, on_event=None, on_raw_event=None, cwd=None):
+                     api_base_url="", live=True, on_event=None, on_raw_event=None,
+                     cwd=None, resume=False):
         return RunResult(
             success=True,
             output=f"[fake] {instance.name} handled message",
@@ -34,7 +35,8 @@ class CascadingAdapter(AdapterType):
         self._routine_registry = routine_registry
 
     def send_message(self, instance, user_message, session_id, session_token="",
-                     api_base_url="", live=True, on_event=None, on_raw_event=None, cwd=None):
+                     api_base_url="", live=True, on_event=None, on_raw_event=None,
+                     cwd=None, resume=False):
         # Find which routine this instance belongs to, publish to its channels
         for routine in self._routine_registry.all():
             if routine.adapter_instance == instance.name:

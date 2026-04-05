@@ -81,22 +81,22 @@ class AdapterType(ABC):
         on_event: Callable[[dict[str, Any]], None] | None = None,
         on_raw_event: Callable[[TranscriptEvent], None] | None = None,
         cwd: Path | None = None,
+        resume: bool = False,
     ) -> RunResult:
         """Send a message in a session context.
-
-        The adapter uses session_id to determine whether to start a new
-        session or resume an existing one. That logic is adapter-internal.
 
         Args:
             instance: The adapter instance configuration.
             user_message: The user's message text.
-            session_id: Cambium session ID. Adapter uses this for resume logic.
+            session_id: Cambium session ID.
             session_token: JWT for authenticating with the Cambium API.
             api_base_url: Base URL of the Cambium API server.
             live: If False, return a mock result (for testing).
             on_event: Callback receiving OpenAI chat.completion.chunk dicts.
             on_raw_event: Callback receiving TranscriptEvents for persistence.
                 Each adapter translates its native events into TranscriptEvent.
+            resume: If True, the session has prior conversation history and the
+                adapter should continue it rather than starting fresh.
         """
         ...
 
