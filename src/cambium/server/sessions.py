@@ -11,7 +11,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from cambium.session.model import Session, SessionStatus, SessionType
+from cambium.session.model import Session, SessionOrigin, SessionStatus
 
 log = logging.getLogger(__name__)
 
@@ -29,7 +29,7 @@ class CreateSessionRequest(BaseModel):
 
 class SessionResponse(BaseModel):
     id: str
-    type: str
+    origin: str
     status: str
     routine_name: str | None
     adapter_instance_name: str | None
@@ -79,6 +79,18 @@ def _get_deps():
 # --- Endpoints ---
 
 
+@router.get("", response_model=list[SessionResponse])
+def list_sessions(origin: str | None = None, status: str | None = None, limit: int = 50):
+    """List sessions, optionally filtered by origin and/or status."""
+    store, _, _, _ = _get_deps()
+
+    origin_filter = SessionOrigin(origin) if origin else None
+    status_filter = SessionStatus(status) if status else None
+
+    sessions = store.list_sessions(origin=origin_filter, status=status_filter, limit=limit)
+    return [_session_to_response(s) for s in sessions]
+
+
 @router.post("", response_model=SessionResponse, status_code=201)
 def create_session(body: CreateSessionRequest):
     """Create an interactive session."""
@@ -91,14 +103,14 @@ def create_session(body: CreateSessionRequest):
     adapter_instance_name = body.adapter_instance_name or routine.adapter_instance
 
     session = Session.create(
-        session_type=SessionType.INTERACTIVE,
+        origin=SessionOrigin.USER,
         routine_name=body.routine_name,
         adapter_instance_name=adapter_instance_name,
         metadata=body.metadata,
     )
     store.create_session(session)
 
-    log.info(f"Created interactive session {session.id[:8]} for routine '{body.routine_name}'")
+    log.info(f"Created user session {session.id[:8]} for routine '{body.routine_name}'")
     return _session_to_response(session)
 
 
@@ -110,8 +122,7 @@ async def send_message(session_id: str, body: SendMessageRequest):
     session = store.get_session(session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
-    if session.status in (SessionStatus.COMPLETED, SessionStatus.FAILED):
-        raise HTTPException(status_code=409, detail=f"Session is {session.status.value}")
+    # Completed/failed sessions can be reopened — the runner reactivates them
 
     routine = routine_reg.get(session.routine_name)
     if routine is None:
@@ -241,6 +252,21 @@ async def stream_session(session_id: str):
     )
 
 
+@router.patch("/{session_id}/metadata", response_model=SessionResponse)
+def update_metadata(session_id: str, body: dict[str, Any]):
+    """Merge keys into session metadata."""
+    store, _, _, _ = _get_deps()
+
+    session = store.get_session(session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    store.update_metadata(session_id, body)
+
+    updated = store.get_session(session_id)
+    return _session_to_response(updated)
+
+
 @router.delete("/{session_id}", status_code=204)
 def delete_session(session_id: str):
     """End a session."""
@@ -263,7 +289,7 @@ def delete_session(session_id: str):
 def _session_to_response(session: Session) -> SessionResponse:
     return SessionResponse(
         id=session.id,
-        type=session.type.value,
+        origin=session.origin.value,
         status=session.status.value,
         routine_name=session.routine_name,
         adapter_instance_name=session.adapter_instance_name,

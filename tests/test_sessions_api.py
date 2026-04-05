@@ -36,7 +36,7 @@ def server(tmp_path: Path) -> CambiumServer:
     routines_dir.mkdir(parents=True)
     (routines_dir / "handler.yaml").write_text(
         "name: handler\nadapter_instance: handler\n"
-        "listen: [tasks, goals]\npublish: [results]\n"
+        "listen: [tasks, events]\npublish: [results]\n"
     )
 
     srv = build_server(
@@ -60,7 +60,7 @@ class TestCreateSession:
         resp = client.post("/sessions", json={"routine_name": "handler"})
         assert resp.status_code == 201
         data = resp.json()
-        assert data["type"] == "interactive"
+        assert data["origin"] == "user"
         assert data["status"] == "created"
         assert data["routine_name"] == "handler"
         assert len(data["id"]) == 36
@@ -190,6 +190,63 @@ class TestSendMessage:
             json={"messages": [{"role": "system", "content": "You are helpful"}]},
         )
         assert resp.status_code == 400
+
+
+class TestSendMessageToCompletedSession:
+    def test_send_message_to_completed_session_reopens_it(self, client: TestClient, server):
+        # Create and complete a session
+        create_resp = client.post("/sessions", json={"routine_name": "handler"})
+        session_id = create_resp.json()["id"]
+        client.delete(f"/sessions/{session_id}")
+
+        # Verify it's completed
+        get_resp = client.get(f"/sessions/{session_id}")
+        assert get_resp.json()["status"] == "completed"
+
+        # Send a message — should NOT return 409
+        with client.stream(
+            "POST",
+            f"/sessions/{session_id}/messages",
+            json={"messages": [{"role": "user", "content": "Follow-up"}]},
+        ) as resp:
+            assert resp.status_code == 200
+            for _ in resp.iter_lines():
+                pass
+
+
+class TestUpdateMetadata:
+    def test_patch_metadata(self, client: TestClient):
+        create_resp = client.post("/sessions", json={"routine_name": "handler"})
+        session_id = create_resp.json()["id"]
+
+        resp = client.patch(
+            f"/sessions/{session_id}/metadata",
+            json={"reflected_through_sequence": 15},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["metadata"]["reflected_through_sequence"] == 15
+
+    def test_patch_metadata_merges(self, client: TestClient):
+        create_resp = client.post("/sessions", json={
+            "routine_name": "handler",
+            "metadata": {"original_key": "preserved"},
+        })
+        session_id = create_resp.json()["id"]
+
+        resp = client.patch(
+            f"/sessions/{session_id}/metadata",
+            json={"new_key": "added"},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["metadata"]["original_key"] == "preserved"
+        assert resp.json()["metadata"]["new_key"] == "added"
+
+    def test_patch_metadata_missing_session(self, client: TestClient):
+        resp = client.patch(
+            "/sessions/nonexistent/metadata",
+            json={"key": "value"},
+        )
+        assert resp.status_code == 404
 
 
 class TestStreamSession:

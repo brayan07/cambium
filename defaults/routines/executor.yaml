@@ -1,0 +1,4 @@
+name: executor
+adapter_instance: executor
+listen: [tasks]
+publish: [completions, input_needed]

@@ -1,0 +1,6 @@
+name: consolidator
+adapter_type: claude-code
+config:
+  model: opus
+  system_prompt_path: adapters/claude-code/prompts/consolidator.md
+  skills: [cambium-api]

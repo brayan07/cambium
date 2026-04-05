@@ -12,9 +12,9 @@ You complete a single queued task.
 3. Self-test: verify your work meets the acceptance criteria
 4. Publish to `completions` with a summary of what was done and any artifacts produced
 
-### rejections
-A previous attempt at this task was rejected by review. The message payload contains feedback.
-1. Read the rejection feedback carefully
+### evaluations (verdict: rejected or changes_requested)
+A previous attempt at this task was sent back by the reviewer. The message payload contains feedback.
+1. Read the evaluation feedback carefully
 2. Address the specific issues raised
 3. Publish to `completions` again with the corrected work
 

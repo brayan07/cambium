@@ -22,7 +22,8 @@ class FakeAdapter(AdapterType):
         self._result = result or RunResult(success=True, output="[fake] done")
 
     def send_message(self, instance, user_message, session_id, session_token="",
-                     api_base_url="", live=True, on_event=None, on_raw_event=None, cwd=None):
+                     api_base_url="", live=True, on_event=None, on_raw_event=None,
+                     cwd=None, resume=False):
         if on_event:
             on_event({"type": "chunk", "text": "hello"})
         return RunResult(
@@ -68,7 +69,7 @@ class TestConsumerLoop:
     def test_message_matches_correct_routine(self, tmp_path: Path):
         loop, queue = _make_loop(tmp_path, [
             ("handler.yaml", "name: handler\nadapter_instance: basic\nlisten: [tasks]\n"),
-            ("other.yaml", "name: other\nadapter_instance: basic\nlisten: [reviews]\n"),
+            ("other.yaml", "name: other\nadapter_instance: basic\nlisten: [evaluations]\n"),
         ])
         queue.publish(Message.create(channel="tasks", payload={}, source="test"))
 

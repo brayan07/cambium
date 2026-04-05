@@ -15,7 +15,8 @@ class FakeAdapter(AdapterType):
         self.last_call = None
 
     def send_message(self, instance, user_message, session_id, session_token="",
-                     api_base_url="", live=True, on_event=None, on_raw_event=None, cwd=None):
+                     api_base_url="", live=True, on_event=None, on_raw_event=None,
+                     cwd=None, resume=False):
         self.last_call = {
             "instance": instance,
             "user_message": user_message,
@@ -23,6 +24,7 @@ class FakeAdapter(AdapterType):
             "token": session_token,
             "api_url": api_base_url,
             "cwd": cwd,
+            "resume": resume,
         }
         return RunResult(success=True, output=f"[fake] ran {instance.name}",
                          session_id=session_id)
@@ -32,8 +34,8 @@ class TestRoutineRunner:
     def _make_runner(self, tmp_path: Path) -> tuple[RoutineRunner, FakeAdapter]:
         inst_dir = tmp_path / "instances"
         inst_dir.mkdir()
-        (inst_dir / "triage.yaml").write_text(
-            "name: triage\n"
+        (inst_dir / "coordinator.yaml").write_text(
+            "name: coordinator\n"
             "adapter_type: fake\n"
             "config:\n"
             "  model: haiku\n"
@@ -48,13 +50,13 @@ class TestRoutineRunner:
 
     def test_send_message_resolves_and_executes(self, tmp_path: Path):
         runner, adapter = self._make_runner(tmp_path)
-        routine = Routine(name="triage", adapter_instance="triage", listen=["goals"])
-        msg = Message.create(channel="goals", payload={"goal": "test"}, source="test")
+        routine = Routine(name="coordinator", adapter_instance="coordinator", listen=["events"])
+        msg = Message.create(channel="events", payload={"goal": "test"}, source="test")
 
         result = runner.send_message(routine, msg)
         assert result.success is True
         assert adapter.last_call is not None
-        assert adapter.last_call["instance"].name == "triage"
+        assert adapter.last_call["instance"].name == "coordinator"
         assert len(adapter.last_call["token"]) > 0
         assert len(adapter.last_call["session_id"]) == 36  # UUID
 
@@ -86,7 +88,7 @@ class TestRoutineRunner:
         from cambium.server.auth import _SIGNING_KEY
 
         runner, adapter = self._make_runner(tmp_path)
-        routine = Routine(name="my-routine", adapter_instance="triage", listen=[])
+        routine = Routine(name="my-routine", adapter_instance="coordinator", listen=[])
         msg = Message.create(channel="x", payload={}, source="test")
 
         runner.send_message(routine, msg)
@@ -101,8 +103,8 @@ class TestRoutineRunner:
         runner, adapter = self._make_runner(tmp_path)
         runner.session_store = SessionStore()
 
-        routine = Routine(name="triage", adapter_instance="triage", listen=["goals"])
-        msg = Message.create(channel="goals", payload={"goal": "test"}, source="test")
+        routine = Routine(name="coordinator", adapter_instance="coordinator", listen=["events"])
+        msg = Message.create(channel="events", payload={"goal": "test"}, source="test")
 
         result = runner.send_message(routine, msg)
         assert result.success is True
@@ -110,7 +112,7 @@ class TestRoutineRunner:
         # Session should exist in store
         session = runner.session_store.get_session(result.session_id)
         assert session is not None
-        assert session.routine_name == "triage"
+        assert session.routine_name == "coordinator"
         assert session.status.value == "completed"
 
         # Messages should be stored
@@ -122,8 +124,8 @@ class TestRoutineRunner:
     def test_session_working_dir_created_and_passed(self, tmp_path: Path):
         inst_dir = tmp_path / "instances"
         inst_dir.mkdir()
-        (inst_dir / "triage.yaml").write_text(
-            "name: triage\nadapter_type: fake\nconfig:\n  model: haiku\n"
+        (inst_dir / "coordinator.yaml").write_text(
+            "name: coordinator\nadapter_type: fake\nconfig:\n  model: haiku\n"
         )
         adapter = FakeAdapter()
         instance_reg = AdapterInstanceRegistry(inst_dir)
@@ -132,8 +134,8 @@ class TestRoutineRunner:
             instance_registry=instance_reg,
             user_dir=tmp_path,
         )
-        routine = Routine(name="triage", adapter_instance="triage", listen=["goals"])
-        msg = Message.create(channel="goals", payload={"goal": "test"}, source="test")
+        routine = Routine(name="coordinator", adapter_instance="coordinator", listen=["events"])
+        msg = Message.create(channel="events", payload={"goal": "test"}, source="test")
 
         result = runner.send_message(routine, msg)
         assert result.success is True
@@ -147,17 +149,89 @@ class TestRoutineRunner:
 
     def test_no_session_dir_without_user_dir(self, tmp_path: Path):
         runner, adapter = self._make_runner(tmp_path)
-        routine = Routine(name="triage", adapter_instance="triage", listen=["goals"])
-        msg = Message.create(channel="goals", payload={"goal": "test"}, source="test")
+        routine = Routine(name="coordinator", adapter_instance="coordinator", listen=["events"])
+        msg = Message.create(channel="events", payload={"goal": "test"}, source="test")
 
         result = runner.send_message(routine, msg)
         assert result.success is True
         assert adapter.last_call["cwd"] is None
 
+    def test_completed_session_reactivated_on_new_message(self, tmp_path: Path):
+        from cambium.session.model import Session, SessionOrigin, SessionStatus
+        from cambium.session.store import SessionStore
+
+        runner, adapter = self._make_runner(tmp_path)
+        store = SessionStore()
+        runner.session_store = store
+
+        # Create a completed session
+        session = Session.create(
+            origin=SessionOrigin.USER,
+            routine_name="coordinator",
+            adapter_instance_name="coordinator",
+        )
+        store.create_session(session)
+        store.update_status(session.id, SessionStatus.COMPLETED)
+        assert store.get_session(session.id).status == SessionStatus.COMPLETED
+
+        # Send a message to the completed session
+        routine = Routine(name="coordinator", adapter_instance="coordinator", listen=["events"])
+        result = runner.send_message(
+            routine, session_id=session.id, user_message="follow-up question",
+        )
+        assert result.success is True
+
+        # Session should be completed again (runner sets final status)
+        got = store.get_session(session.id)
+        assert got.status == SessionStatus.COMPLETED
+
+        # Messages should include the new user message
+        messages = store.get_messages(session.id)
+        assert any(m.content == "follow-up question" for m in messages)
+
+        # Adapter should have been told to resume
+        assert adapter.last_call["resume"] is True
+
+    def test_failed_session_reactivated_on_new_message(self, tmp_path: Path):
+        from cambium.session.model import Session, SessionOrigin, SessionStatus
+        from cambium.session.store import SessionStore
+
+        runner, adapter = self._make_runner(tmp_path)
+        store = SessionStore()
+        runner.session_store = store
+
+        session = Session.create(
+            origin=SessionOrigin.USER,
+            routine_name="coordinator",
+            adapter_instance_name="coordinator",
+        )
+        store.create_session(session)
+        store.update_status(session.id, SessionStatus.FAILED)
+
+        routine = Routine(name="coordinator", adapter_instance="coordinator", listen=["events"])
+        result = runner.send_message(
+            routine, session_id=session.id, user_message="retry",
+        )
+        assert result.success is True
+        assert adapter.last_call["resume"] is True
+
+    def test_new_session_does_not_resume(self, tmp_path: Path):
+        from cambium.session.store import SessionStore
+
+        runner, adapter = self._make_runner(tmp_path)
+        runner.session_store = SessionStore()
+
+        routine = Routine(name="coordinator", adapter_instance="coordinator", listen=["events"])
+        msg = Message.create(channel="events", payload={"goal": "test"}, source="test")
+
+        result = runner.send_message(routine, msg)
+        assert result.success is True
+        assert adapter.last_call["resume"] is False
+
     def test_resume_session_with_existing_id(self, tmp_path: Path):
         runner, adapter = self._make_runner(tmp_path)
-        routine = Routine(name="triage", adapter_instance="triage", listen=["goals"])
-        msg = Message.create(channel="goals", payload={"goal": "test"}, source="test")
+        routine = Routine(name="coordinator", adapter_instance="coordinator", listen=["events"])
+        msg = Message.create(channel="events", payload={"goal": "test"}, source="test")
 
         result = runner.send_message(routine, msg, session_id="existing-session-id")
         assert result.success is True

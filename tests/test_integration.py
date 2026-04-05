@@ -15,7 +15,8 @@ class FakeAdapter(AdapterType):
     name = "fake"
 
     def send_message(self, instance, user_message, session_id, session_token="",
-                     api_base_url="", live=True, on_event=None, on_raw_event=None, cwd=None):
+                     api_base_url="", live=True, on_event=None, on_raw_event=None,
+                     cwd=None, resume=False):
         return RunResult(
             success=True,
             output=f"[fake] {instance.name} handled message",
@@ -34,7 +35,8 @@ class CascadingAdapter(AdapterType):
         self._routine_registry = routine_registry
 
     def send_message(self, instance, user_message, session_id, session_token="",
-                     api_base_url="", live=True, on_event=None, on_raw_event=None, cwd=None):
+                     api_base_url="", live=True, on_event=None, on_raw_event=None,
+                     cwd=None, resume=False):
         # Find which routine this instance belongs to, publish to its channels
         for routine in self._routine_registry.all():
             if routine.adapter_instance == instance.name:
@@ -62,18 +64,18 @@ class TestEndToEnd:
         # Adapter instance
         inst_dir = tmp_path / "instances"
         inst_dir.mkdir()
-        (inst_dir / "triage.yaml").write_text(
-            "name: triage\nadapter_type: fake\n"
+        (inst_dir / "coordinator.yaml").write_text(
+            "name: coordinator\nadapter_type: fake\n"
             "config:\n  model: haiku\n"
         )
 
         # Routine
         routines_dir = tmp_path / "routines"
         routines_dir.mkdir()
-        (routines_dir / "triage.yaml").write_text(
-            "name: triage\n"
-            "adapter_instance: triage\n"
-            "listen: [goals]\n"
+        (routines_dir / "coordinator.yaml").write_text(
+            "name: coordinator\n"
+            "adapter_instance: coordinator\n"
+            "listen: [events]\n"
             "publish: [tasks]\n"
         )
 
@@ -89,7 +91,7 @@ class TestEndToEnd:
         loop = ConsumerLoop(queue, routine_reg, runner)
 
         # Publish a message
-        msg = Message.create(channel="goals", payload={"goal": "test"}, source="test")
+        msg = Message.create(channel="events", payload={"goal": "test"}, source="test")
         queue.publish(msg)
         assert queue.pending_count() == 1
 
@@ -97,7 +99,7 @@ class TestEndToEnd:
         results = loop.tick()
         assert len(results) == 1
         assert results[0].success is True
-        assert "triage" in results[0].output
+        assert "coordinator" in results[0].output
         assert queue.pending_count() == 0
 
     def test_message_with_no_listener_stays_pending(self, tmp_path: Path):
@@ -161,21 +163,21 @@ class TestEndToEnd:
 
 
 class TestCascade:
-    """Test multi-hop message flow: goals → triage → tasks → executor → completions → reviewer."""
+    """Test multi-hop message flow: events → coordinator → tasks → executor → completions → reviewer."""
 
     def _setup_cascade(self, tmp_path: Path):
         inst_dir = tmp_path / "instances"
         inst_dir.mkdir()
-        for name in ("triage", "executor", "reviewer"):
+        for name in ("coordinator", "executor", "reviewer"):
             (inst_dir / f"{name}.yaml").write_text(
                 f"name: {name}\nadapter_type: fake\n"
             )
 
         routines_dir = tmp_path / "routines"
         routines_dir.mkdir()
-        (routines_dir / "triage.yaml").write_text(
-            "name: triage\nadapter_instance: triage\n"
-            "listen: [goals]\npublish: [tasks]\n"
+        (routines_dir / "coordinator.yaml").write_text(
+            "name: coordinator\nadapter_instance: coordinator\n"
+            "listen: [events]\npublish: [tasks]\n"
         )
         (routines_dir / "executor.yaml").write_text(
             "name: executor\nadapter_instance: executor\n"
@@ -204,13 +206,13 @@ class TestCascade:
 
         # Seed the cascade
         queue.publish(Message.create(
-            channel="goals", payload={"goal": "build something"}, source="user",
+            channel="events", payload={"goal": "build something"}, source="user",
         ))
 
-        # Tick 1: triage picks up goals, publishes to tasks
+        # Tick 1: coordinator picks up events, publishes to tasks
         results = loop.tick()
         assert len(results) == 1
-        assert "triage" in results[0].output
+        assert "coordinator" in results[0].output
         assert queue.pending_count(["tasks"]) == 1
 
         # Tick 2: executor picks up tasks, publishes to completions
@@ -232,7 +234,7 @@ class TestCascade:
         loop, queue, broadcaster_reg = self._setup_cascade(tmp_path)
 
         queue.publish(Message.create(
-            channel="goals", payload={"goal": "test"}, source="user",
+            channel="events", payload={"goal": "test"}, source="user",
         ))
 
         for _ in range(3):
@@ -247,14 +249,14 @@ class TestCascade:
         loop, queue, _ = self._setup_cascade(tmp_path)
 
         queue.publish(Message.create(
-            channel="goals", payload={"goal": "test cascade"}, source="user",
+            channel="events", payload={"goal": "test cascade"}, source="user",
         ))
 
-        # Tick 1: triage runs
+        # Tick 1: coordinator runs
         loop.tick()
 
-        # The message on 'tasks' should carry context from triage
+        # The message on 'tasks' should carry context from coordinator
         tasks_messages = queue.consume(["tasks"], limit=1)
         assert len(tasks_messages) == 1
-        assert tasks_messages[0].payload["from"] == "triage"
+        assert tasks_messages[0].payload["from"] == "coordinator"
         assert "goal" in tasks_messages[0].payload.get("upstream", "")

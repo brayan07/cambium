@@ -1,4 +1,0 @@
-name: execution
-adapter_instance: execution
-listen: [tasks, rejections]
-publish: [completions]

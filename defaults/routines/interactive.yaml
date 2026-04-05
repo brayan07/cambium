@@ -1,4 +1,0 @@
-name: interactive
-adapter_instance: interactive
-listen: [sessions]
-publish: [goals, feedback]

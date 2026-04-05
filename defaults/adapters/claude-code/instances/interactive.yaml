@@ -1,6 +1,0 @@
-name: interactive
-adapter_type: claude-code
-config:
-  model: opus
-  system_prompt_path: adapters/claude-code/prompts/interactive.md
-  skills: [cambium-api]

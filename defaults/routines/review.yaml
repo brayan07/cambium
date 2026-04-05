@@ -1,4 +1,0 @@
-name: review
-adapter_instance: review
-listen: [completions]
-publish: [reviews, rejections]

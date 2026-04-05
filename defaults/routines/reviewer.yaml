@@ -1,0 +1,4 @@
+name: reviewer
+adapter_instance: reviewer
+listen: [completions]
+publish: [evaluations]

@@ -1,6 +1,0 @@
-name: review
-adapter_type: claude-code
-config:
-  model: opus
-  system_prompt_path: adapters/claude-code/prompts/review.md
-  skills: [cambium-api]

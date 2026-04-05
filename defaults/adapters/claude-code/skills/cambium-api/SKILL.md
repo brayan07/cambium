@@ -29,17 +29,14 @@ These are the channels in the system. Your routine can only publish to a subset 
 
 | Channel | Purpose |
 |---------|---------|
-| `goals` | User-articulated goals and objectives |
-| `feedback` | User feedback on system behavior |
-| `schedule` | Scheduled triggers (daily sweeps, etc.) |
-| `plans` | Goals that need decomposition into tasks |
+| `events` | External triggers (ClickUp, cron, user actions) |
+| `plans` | Projects/goals that need decomposition into tasks |
 | `tasks` | Concrete tasks ready for execution |
 | `completions` | Completed work awaiting review |
-| `reviews` | Approved work (review passed) |
-| `rejections` | Work rejected by review with feedback |
-| `reflections` | Triggers for self-evaluation |
-| `improvements` | Proposed skill/routine improvements |
-| `sessions` | User session events |
+| `evaluations` | Review verdicts (accepted / rejected / changes_requested) |
+| `reflections` | Observations from the consolidator about patterns and improvements |
+| `sessions_completed` | Session lifecycle events (system-emitted) |
+| `input_needed` | Requests for user input (auto-persisted to central store) |
 
 ## Checking Your Permissions
 
@@ -63,7 +60,7 @@ curl -s "$CAMBIUM_API_URL/queue/status"
 
 ## Examples
 
-### Triage publishing a task
+### Planner publishing a task
 
 ```bash
 curl -s -X POST "$CAMBIUM_API_URL/channels/tasks/publish" \
@@ -78,7 +75,7 @@ curl -s -X POST "$CAMBIUM_API_URL/channels/tasks/publish" \
   }'
 ```
 
-### Execution publishing a completion
+### Executor publishing a completion
 
 ```bash
 curl -s -X POST "$CAMBIUM_API_URL/channels/completions/publish" \
@@ -93,23 +90,37 @@ curl -s -X POST "$CAMBIUM_API_URL/channels/completions/publish" \
   }'
 ```
 
-### Review approving work
+### Reviewer publishing an evaluation
 
 ```bash
-curl -s -X POST "$CAMBIUM_API_URL/channels/reviews/publish" \
+curl -s -X POST "$CAMBIUM_API_URL/channels/evaluations/publish" \
   -H 'Content-Type: application/json' \
   -H "Authorization: Bearer $CAMBIUM_TOKEN" \
   -d '{
     "payload": {
       "task": "Research Python testing frameworks",
+      "verdict": "accepted",
       "assessment": "Work meets acceptance criteria. Thorough comparison."
     }
   }'
 ```
 
+## Updating Session Metadata
+
+To store a watermark or other metadata on a session (e.g., after reflecting on a session transcript):
+
+```bash
+curl -s -X PATCH "$CAMBIUM_API_URL/sessions/SESSION_ID/metadata" \
+  -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer $CAMBIUM_TOKEN" \
+  -d '{"reflected_through_sequence": 42}'
+```
+
+Keys are merged into existing metadata — you don't need to include the full metadata object.
+
 ## Important
 
 - Always publish messages when your routine produces results that should trigger downstream processing.
 - Include enough context in the payload that downstream routines can act without re-reading everything.
-- You may publish multiple messages if your work produces multiple outputs (e.g., planning decomposes a goal into several tasks).
+- You may publish multiple messages if your work produces multiple outputs (e.g., planner decomposes a goal into several tasks).
 - Use `$CAMBIUM_API_URL` and `$CAMBIUM_TOKEN` — never hardcode the URL or token.

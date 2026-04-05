@@ -15,7 +15,7 @@ from cambium.adapters.base import AdapterInstanceRegistry, AdapterType, RunResul
 from cambium.models.message import Message
 from cambium.models.routine import Routine
 from cambium.server.auth import create_session_token
-from cambium.session.model import Session, SessionMessage, SessionStatus, SessionType, TranscriptEvent
+from cambium.session.model import Session, SessionMessage, SessionOrigin, SessionStatus, TranscriptEvent
 from cambium.session.store import SessionStore
 
 
@@ -73,25 +73,32 @@ class RoutineRunner:
             )
 
         # Create or reuse session
-        is_new_session = session_id is None
-        if is_new_session:
+        resume = False
+        if session_id is None:
             session_id = str(uuid.uuid4())
 
-        if self.session_store and is_new_session:
-            session = Session.create(
-                session_type=SessionType.ONE_SHOT,
-                routine_name=routine.name,
-                adapter_instance_name=routine.adapter_instance,
-                metadata={"trigger_channel": message.channel, "trigger_message_id": message.id} if message else {},
-            )
-            session.id = session_id
-            session.status = SessionStatus.ACTIVE
-            self.session_store.create_session(session)
-        elif self.session_store and not is_new_session:
-            # Interactive session: activate if still in CREATED status
+        if self.session_store:
             existing = self.session_store.get_session(session_id)
-            if existing and existing.status == SessionStatus.CREATED:
+            if existing is None:
+                # New session — create and persist
+                session = Session.create(
+                    origin=SessionOrigin.SYSTEM,
+                    routine_name=routine.name,
+                    adapter_instance_name=routine.adapter_instance,
+                    metadata={"trigger_channel": message.channel, "trigger_message_id": message.id} if message else {},
+                )
+                session.id = session_id
+                session.status = SessionStatus.ACTIVE
+                self.session_store.create_session(session)
+            elif existing.status in (SessionStatus.CREATED, SessionStatus.COMPLETED, SessionStatus.FAILED):
+                # Activate: new interactive session, or reopened completed/failed session
                 self.session_store.update_status(session_id, SessionStatus.ACTIVE)
+                # Resume if the session has prior messages (not just CREATED with no history)
+                if existing.status in (SessionStatus.COMPLETED, SessionStatus.FAILED):
+                    resume = True
+            elif existing.status == SessionStatus.ACTIVE:
+                # Already active (e.g., second message in interactive session)
+                resume = True
 
         # Issue session token
         token = create_session_token(routine.name, session_id)
@@ -145,6 +152,7 @@ class RoutineRunner:
             on_event=on_event,
             on_raw_event=on_raw_event,
             cwd=session_dir,
+            resume=resume,
         )
 
         # If no raw events were captured but we have output, store it as a
@@ -159,7 +167,7 @@ class RoutineRunner:
             )
 
         # Update session status
-        if self.session_store and is_new_session:
+        if self.session_store:
             status = SessionStatus.COMPLETED if result.success else SessionStatus.FAILED
             self.session_store.update_status(session_id, status)
 

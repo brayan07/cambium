@@ -1,4 +1,0 @@
-name: planning
-adapter_instance: planning
-listen: [plans]
-publish: [tasks]

@@ -87,7 +87,7 @@ def cmd_chat(args: argparse.Namespace) -> None:
     print(f"Starting chat (routine: {args.routine}, adapter: {instance.adapter_type}, session: {session_id[:8]})")
 
     try:
-        adapter.launch_interactive(instance, session_id, cwd=session_dir)
+        adapter.attach(instance, session_id, cwd=session_dir)
     except NotImplementedError as e:
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
@@ -133,7 +133,7 @@ def main() -> None:
     send.add_argument("--port", type=int, default=8350)
 
     # chat
-    chat = sub.add_parser("chat", help="Start an interactive chat session via Claude CLI")
+    chat = sub.add_parser("chat", help="Attach to a live session via Claude CLI")
     chat.add_argument("routine", help="Routine name (e.g. interactive)")
 
     args = parser.parse_args()
