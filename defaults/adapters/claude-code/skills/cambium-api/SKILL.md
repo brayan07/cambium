@@ -105,6 +105,19 @@ curl -s -X POST "$CAMBIUM_API_URL/channels/evaluations/publish" \
   }'
 ```
 
+## Updating Session Metadata
+
+To store a watermark or other metadata on a session (e.g., after reflecting on a session transcript):
+
+```bash
+curl -s -X PATCH "$CAMBIUM_API_URL/sessions/SESSION_ID/metadata" \
+  -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer $CAMBIUM_TOKEN" \
+  -d '{"reflected_through_sequence": 42}'
+```
+
+Keys are merged into existing metadata — you don't need to include the full metadata object.
+
 ## Important
 
 - Always publish messages when your routine produces results that should trigger downstream processing.

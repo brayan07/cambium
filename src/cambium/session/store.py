@@ -94,6 +94,21 @@ class SessionStore:
         )
         self._conn.commit()
 
+    def update_metadata(self, session_id: str, metadata: dict) -> None:
+        """Merge keys into existing session metadata."""
+        from datetime import datetime, timezone
+
+        session = self.get_session(session_id)
+        if session is None:
+            return
+        merged = {**session.metadata, **metadata}
+        now = datetime.now(timezone.utc).isoformat()
+        self._conn.execute(
+            "UPDATE sessions SET metadata = ?, updated_at = ? WHERE id = ?",
+            (json.dumps(merged), now, session_id),
+        )
+        self._conn.commit()
+
     def list_sessions(
         self,
         status: SessionStatus | None = None,

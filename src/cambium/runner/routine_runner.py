@@ -89,8 +89,8 @@ class RoutineRunner:
                 session.id = session_id
                 session.status = SessionStatus.ACTIVE
                 self.session_store.create_session(session)
-            elif existing.status == SessionStatus.CREATED:
-                # Existing session (e.g., from API): activate on first message
+            elif existing.status in (SessionStatus.CREATED, SessionStatus.COMPLETED, SessionStatus.FAILED):
+                # Activate: new interactive session, or reopened completed/failed session
                 self.session_store.update_status(session_id, SessionStatus.ACTIVE)
 
         # Issue session token

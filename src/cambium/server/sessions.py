@@ -122,8 +122,7 @@ async def send_message(session_id: str, body: SendMessageRequest):
     session = store.get_session(session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
-    if session.status in (SessionStatus.COMPLETED, SessionStatus.FAILED):
-        raise HTTPException(status_code=409, detail=f"Session is {session.status.value}")
+    # Completed/failed sessions can be reopened — the runner reactivates them
 
     routine = routine_reg.get(session.routine_name)
     if routine is None:
@@ -251,6 +250,21 @@ async def stream_session(session_id: str):
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+@router.patch("/{session_id}/metadata", response_model=SessionResponse)
+def update_metadata(session_id: str, body: dict[str, Any]):
+    """Merge keys into session metadata."""
+    store, _, _, _ = _get_deps()
+
+    session = store.get_session(session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    store.update_metadata(session_id, body)
+
+    updated = store.get_session(session_id)
+    return _session_to_response(updated)
 
 
 @router.delete("/{session_id}", status_code=204)

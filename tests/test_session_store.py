@@ -132,6 +132,39 @@ class TestSessionMessages:
         assert messages[0].sequence == 0
         assert messages[1].sequence == 1
 
+    def test_update_metadata_merges_keys(self):
+        store = SessionStore()
+        session = Session.create(
+            origin=SessionOrigin.SYSTEM,
+            metadata={"trigger": "events", "message_id": "abc"},
+        )
+        store.create_session(session)
+
+        store.update_metadata(session.id, {"reflected_through_sequence": 15})
+
+        got = store.get_session(session.id)
+        assert got.metadata["trigger"] == "events"
+        assert got.metadata["message_id"] == "abc"
+        assert got.metadata["reflected_through_sequence"] == 15
+
+    def test_update_metadata_overwrites_existing_key(self):
+        store = SessionStore()
+        session = Session.create(
+            origin=SessionOrigin.SYSTEM,
+            metadata={"reflected_through_sequence": 5},
+        )
+        store.create_session(session)
+
+        store.update_metadata(session.id, {"reflected_through_sequence": 20})
+
+        got = store.get_session(session.id)
+        assert got.metadata["reflected_through_sequence"] == 20
+
+    def test_update_metadata_nonexistent_session(self):
+        store = SessionStore()
+        # Should not raise
+        store.update_metadata("nonexistent", {"key": "value"})
+
     def test_metadata_persisted(self):
         store = SessionStore()
         session = Session.create(

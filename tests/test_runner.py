@@ -154,6 +154,61 @@ class TestRoutineRunner:
         assert result.success is True
         assert adapter.last_call["cwd"] is None
 
+    def test_completed_session_reactivated_on_new_message(self, tmp_path: Path):
+        from cambium.session.model import Session, SessionOrigin, SessionStatus
+        from cambium.session.store import SessionStore
+
+        runner, adapter = self._make_runner(tmp_path)
+        store = SessionStore()
+        runner.session_store = store
+
+        # Create a completed session
+        session = Session.create(
+            origin=SessionOrigin.USER,
+            routine_name="coordinator",
+            adapter_instance_name="coordinator",
+        )
+        store.create_session(session)
+        store.update_status(session.id, SessionStatus.COMPLETED)
+        assert store.get_session(session.id).status == SessionStatus.COMPLETED
+
+        # Send a message to the completed session
+        routine = Routine(name="coordinator", adapter_instance="coordinator", listen=["events"])
+        result = runner.send_message(
+            routine, session_id=session.id, user_message="follow-up question",
+        )
+        assert result.success is True
+
+        # Session should be completed again (runner sets final status)
+        got = store.get_session(session.id)
+        assert got.status == SessionStatus.COMPLETED
+
+        # Messages should include the new user message
+        messages = store.get_messages(session.id)
+        assert any(m.content == "follow-up question" for m in messages)
+
+    def test_failed_session_reactivated_on_new_message(self, tmp_path: Path):
+        from cambium.session.model import Session, SessionOrigin, SessionStatus
+        from cambium.session.store import SessionStore
+
+        runner, adapter = self._make_runner(tmp_path)
+        store = SessionStore()
+        runner.session_store = store
+
+        session = Session.create(
+            origin=SessionOrigin.USER,
+            routine_name="coordinator",
+            adapter_instance_name="coordinator",
+        )
+        store.create_session(session)
+        store.update_status(session.id, SessionStatus.FAILED)
+
+        routine = Routine(name="coordinator", adapter_instance="coordinator", listen=["events"])
+        result = runner.send_message(
+            routine, session_id=session.id, user_message="retry",
+        )
+        assert result.success is True
+
     def test_resume_session_with_existing_id(self, tmp_path: Path):
         runner, adapter = self._make_runner(tmp_path)
         routine = Routine(name="coordinator", adapter_instance="coordinator", listen=["events"])
