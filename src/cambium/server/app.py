@@ -22,6 +22,9 @@ from cambium.models.skill import SkillRegistry
 from cambium.queue.sqlite import SQLiteQueue
 from cambium.runner.routine_runner import RoutineRunner
 from cambium.server.auth import authenticate, verify_session_token
+from cambium.preference.service import PreferenceService
+from cambium.preference.store import PreferenceStore
+from cambium.server import preferences as preferences_module
 from cambium.server import sessions as sessions_module
 from cambium.server import work_items as work_items_module
 from cambium.session.broadcaster import BroadcasterRegistry
@@ -190,10 +193,23 @@ def build_server(
     else:
         wi_db_path = str(Path(db_path).parent / "work_items.db")
     work_item_store = WorkItemStore(wi_db_path)
-    work_item_service = WorkItemService(store=work_item_store, queue=queue)
 
-    # Configure work item endpoints
+    # Preference store + service (separate DB)
+    if db_path == ":memory:":
+        pref_db_path = ":memory:"
+    else:
+        pref_db_path = str(Path(db_path).parent / "preference.db")
+    preference_store = PreferenceStore(pref_db_path)
+    preference_service = PreferenceService(store=preference_store)
+    preference_service.initialize_defaults()
+
+    work_item_service = WorkItemService(
+        store=work_item_store, queue=queue, preference_service=preference_service,
+    )
+
+    # Configure endpoints
     work_items_module.configure(service=work_item_service)
+    preferences_module.configure(service=preference_service, work_item_store=work_item_store)
 
     # Configure session endpoints
     sessions_module.configure(
@@ -248,6 +264,7 @@ app = FastAPI(
 
 app.include_router(sessions_module.router)
 app.include_router(work_items_module.router)
+app.include_router(preferences_module.router)
 
 
 def _get_server() -> CambiumServer:
