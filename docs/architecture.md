@@ -67,9 +67,9 @@ Message
 YAML-defined event handler. Binds a channel listener to an adapter instance. Routines define **permissions** — what a routine can read and write.
 
 ```yaml
-# Example: execution.yaml
-name: execution
-adapter_instance: execution      # Which adapter config to use
+# Example: executor.yaml
+name: executor
+adapter_instance: executor       # Which adapter config to use
 listen: [tasks, rejections]      # Channels to consume from
 publish: [completions]           # Channels allowed to emit to
 ```
@@ -79,12 +79,12 @@ publish: [completions]           # Channels allowed to emit to
 User-configured personality of an adapter type. Each instance has its own model, system prompt, skills, and MCP servers.
 
 ```yaml
-# Example: ~/.cambium/adapters/claude-code/instances/execution.yaml
-name: execution
+# Example: ~/.cambium/adapters/claude-code/instances/executor.yaml
+name: executor
 adapter_type: claude-code
 config:
   model: opus
-  system_prompt_path: adapters/claude-code/prompts/execution.md
+  system_prompt_path: adapters/claude-code/prompts/executor.md
   skills: [cambium-api]
   mcp_servers: [clickup, gmail]
 ```
@@ -168,12 +168,12 @@ graph LR
     end
 
     subgraph Routines
-        interactive["interactive"]
-        triage["triage"]
-        planning["planning"]
-        execution["execution"]
-        review["review"]
-        reflection["reflection"]
+        interlocutor["interlocutor"]
+        triager["triager"]
+        planner["planner"]
+        executor["executor"]
+        reviewer["reviewer"]
+        reflector["reflector"]
     end
 
     subgraph Channels
@@ -186,49 +186,49 @@ graph LR
         improvements(["improvements"])
     end
 
-    sessions --> interactive
-    interactive --> goals
-    interactive --> feedback
+    sessions --> interlocutor
+    interlocutor --> goals
+    interlocutor --> feedback
 
-    goals --> triage
-    feedback --> triage
-    schedule --> triage
-    triage --> plans
-    triage --> tasks
-    triage --> reflections
+    goals --> triager
+    feedback --> triager
+    schedule --> triager
+    triager --> plans
+    triager --> tasks
+    triager --> reflections
 
-    plans --> planning
-    planning --> tasks
+    plans --> planner
+    planner --> tasks
 
-    tasks --> execution
-    rejections --> execution
-    execution --> completions
+    tasks --> executor
+    rejections --> executor
+    executor --> completions
 
-    completions --> review
-    review --> reviews
-    review --> rejections
+    completions --> reviewer
+    reviewer --> reviews
+    reviewer --> rejections
 
-    reviews --> reflection
-    schedule --> reflection
-    reflections --> reflection
-    reflection --> improvements
+    reviews --> reflector
+    schedule --> reflector
+    reflections --> reflector
+    reflector --> improvements
 ```
 
 ### Channel Reference
 
 | Channel | Producers | Consumers | Purpose |
 |---------|-----------|-----------|---------|
-| `sessions` | API / external | interactive | User-initiated conversations |
-| `goals` | interactive | triage | User's stated goals and intentions |
-| `feedback` | interactive | triage | User corrections, preferences, reactions |
-| `schedule` | external (cron) | triage, reflection | Time-based triggers |
-| `plans` | triage | planning | Work that needs decomposition |
-| `tasks` | triage, planning | execution | Concrete work items ready to run |
-| `completions` | execution | review | Finished work awaiting quality check |
-| `reviews` | review | reflection | Quality assessments of completed work |
-| `rejections` | review | execution | Work sent back for revision |
-| `reflections` | triage | reflection | Signals to self-assess and improve |
-| `improvements` | reflection | *(consumed by user/future routines)* | Proposed changes to skills, prompts, config |
+| `sessions` | API / external | interlocutor | User-initiated conversations |
+| `goals` | interlocutor | triager | User's stated goals and intentions |
+| `feedback` | interlocutor | triager | User corrections, preferences, reactions |
+| `schedule` | external (cron) | triager, reflector | Time-based triggers |
+| `plans` | triager | planner | Work that needs decomposition |
+| `tasks` | triager, planner | executor | Concrete work items ready to run |
+| `completions` | executor | reviewer | Finished work awaiting quality check |
+| `reviews` | reviewer | reflector | Quality assessments of completed work |
+| `rejections` | reviewer | executor | Work sent back for revision |
+| `reflections` | triager | reflector | Signals to self-assess and improve |
+| `improvements` | reflector | *(consumed by user/future routines)* | Proposed changes to skills, prompts, config |
 
 ## Data Flow: End to End
 
@@ -288,22 +288,22 @@ All user state lives in `~/.cambium/`, bootstrapped by `cambium init`.
 ├── mcp-servers.json                # MCP server registry (user-created, not seeded by init)
 │
 ├── routines/                       # Channel → adapter bindings
-│   ├── triage.yaml
-│   ├── planning.yaml
-│   ├── execution.yaml
-│   ├── review.yaml
-│   ├── reflection.yaml
-│   └── interactive.yaml
+│   ├── triager.yaml
+│   ├── planner.yaml
+│   ├── executor.yaml
+│   ├── reviewer.yaml
+│   ├── reflector.yaml
+│   └── interlocutor.yaml
 │
 ├── adapters/
 │   └── claude-code/
 │       ├── instances/              # Adapter personalities
-│       │   ├── triage.yaml
-│       │   ├── execution.yaml
+│       │   ├── triager.yaml
+│       │   ├── executor.yaml
 │       │   └── ...
 │       ├── prompts/                # System prompts per instance
-│       │   ├── triage.md
-│       │   ├── execution.md
+│       │   ├── triager.md
+│       │   ├── executor.md
 │       │   └── ...
 │       └── skills/                 # Seeded with cambium-api; user adds custom skills here
 │
@@ -383,7 +383,7 @@ Supports both `stdio` (command + args) and `remote` (url + headers) transports. 
 
 4. **TranscriptEvent as adapter-agnostic contract.** Each adapter translates its native stream format (Claude's stream-json, future adapters' formats) into TranscriptEvents. The runner persists them without inspecting content. Format-specific logic lives in the adapter, not the runner.
 
-5. **JWT-scoped permissions.** Each session gets a token encoding its routine name. When the agent publishes to a channel via `cambium-api`, the server verifies the routine is allowed to publish there. This prevents a triage agent from accidentally writing to `completions`.
+5. **JWT-scoped permissions.** Each session gets a token encoding its routine name. When the agent publishes to a channel via `cambium-api`, the server verifies the routine is allowed to publish there. This prevents the triager from accidentally writing to `completions`.
 
 6. **One-shot vs interactive sessions.** The consumer loop handles one-shot (fire-and-forget) execution. The session API handles interactive (multi-turn, SSE-observable) conversations. Same adapter, different lifecycle.
 
@@ -395,14 +395,14 @@ Supports both `stdio` (command + args) and `remote` (url + headers) transports. 
 - Channel-based pub/sub with JWT permissions
 - `cambium init` with GitHub backup option
 - Interactive sessions via API (SSE streaming)
-- 6 default routines (triage, planning, execution, review, reflection, interactive)
+- 6 default routines (triager, planner, executor, reviewer, reflector, interlocutor)
 
 ### In Progress
 - **Phase 2: Port Marcus** — replacing n8n + async-runner.py with Cambium's consumer loop
 - **ClickUp polling source** — native task ingestion (replacing n8n trigger)
 
 ### Not Yet Built
-- **Self-improvement loop** (Phase 4) — reflection routine proposes changes to skills/prompts; review routine validates; staging environment tests before deploy
+- **Self-improvement loop** (Phase 4) — reflector proposes changes to skills/prompts; reviewer validates; staging environment tests before deploy
 - **Skill testing / staging** — ephemeral environment to validate changes before promoting to production config
 - **Memory / knowledge layer** — `~/.cambium/knowledge/` directory exists but no framework integration
 - **Configuration hot-reload** — changes to routines/adapters/skills require server restart
@@ -416,24 +416,24 @@ The long-term vision. Not yet implemented, but the architecture is designed for 
 
 ```mermaid
 graph TD
-    User["User Session"] -->|feedback, goals| Triage
-    Schedule["Schedule (cron)"] --> Triage
-    Schedule -->|schedule| Reflection
-    Triage -->|plans| Planning
-    Triage -->|tasks| Execution
-    Triage -->|reflections| Reflection
+    User["User Session"] -->|feedback, goals| Triager
+    Schedule["Schedule (cron)"] --> Triager
+    Schedule -->|schedule| Reflector
+    Triager -->|plans| Planner
+    Triager -->|tasks| Executor
+    Triager -->|reflections| Reflector
 
-    Planning -->|tasks| Execution
-    Execution -->|completions| Review
-    Review -->|reviews| Reflection
-    Review -->|rejections| Execution
+    Planner -->|tasks| Executor
+    Executor -->|completions| Reviewer
+    Reviewer -->|reviews| Reflector
+    Reviewer -->|rejections| Executor
 
-    Reflection -->|improvements| Staging["Staging / Test"]
+    Reflector -->|improvements| Staging["Staging / Test"]
     Staging -->|passes| Deploy["Deploy to production<br/>(skills, prompts, config)"]
-    Staging -->|fails| Reflection
+    Staging -->|fails| Reflector
 ```
 
-The reflection routine:
+The reflector:
 1. Receives reviews of completed work + scheduled self-assessment triggers
 2. Attributes outcomes to specific skills, prompts, or decisions
 3. Proposes concrete improvements (skill edits, prompt changes, config tweaks)
