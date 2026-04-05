@@ -20,6 +20,7 @@ from typing import Any, Callable
 from cambium.adapters.base import AdapterInstance, AdapterType, RunResult
 from cambium.mcp.registry import MCPRegistry
 from cambium.models.skill import SkillRegistry
+from cambium.session.model import TranscriptEvent
 
 log = logging.getLogger(__name__)
 
@@ -50,12 +51,14 @@ class ClaudeCodeAdapter(AdapterType):
         api_base_url: str = "",
         live: bool = True,
         on_event: Callable[[dict[str, Any]], None] | None = None,
+        on_raw_event: Callable[[TranscriptEvent], None] | None = None,
         cwd: Path | None = None,
     ) -> RunResult:
         if not live:
             return self._mock_send(instance, user_message, session_id, on_event)
         return self._live_send(
-            instance, user_message, session_id, session_token, api_base_url, on_event, cwd
+            instance, user_message, session_id, session_token, api_base_url,
+            on_event, on_raw_event, cwd,
         )
 
     def _mock_send(
@@ -79,6 +82,7 @@ class ClaudeCodeAdapter(AdapterType):
         session_token: str,
         api_base_url: str,
         on_event: Callable[[dict[str, Any]], None] | None = None,
+        on_raw_event: Callable[[TranscriptEvent], None] | None = None,
         cwd: Path | None = None,
     ) -> RunResult:
         start = time.monotonic()
@@ -158,6 +162,10 @@ class ClaudeCodeAdapter(AdapterType):
                 # Extract session_id from init event
                 if parsed.get("type") == "system" and parsed.get("subtype") == "init":
                     self._active_sessions.add(session_id)
+
+                # Translate to TranscriptEvent and emit for persistence
+                if on_raw_event:
+                    on_raw_event(_to_transcript_event(parsed))
 
                 # Translate to OpenAI chunks and emit
                 chunks = _stream_json_to_openai(parsed, chunk_id, model)
@@ -440,3 +448,84 @@ def _stream_json_to_openai(
     # final assistant text. They're only used for RunResult.output.
 
     return chunks
+
+
+# --- Stream-JSON to TranscriptEvent translation ---
+
+_ROLE_MAP = {
+    "assistant": "assistant",
+    "result": "assistant",
+    "system": "system",
+    "user": "user",
+}
+
+
+def _to_transcript_event(event: dict) -> TranscriptEvent:
+    """Translate a Claude Code stream-json event into an adapter-agnostic TranscriptEvent.
+
+    This is the only place that knows about Claude Code's event format.
+    The runner persists TranscriptEvents without inspecting their contents.
+    """
+    event_type = event.get("type", "unknown")
+    role = _ROLE_MAP.get(event_type, event_type)
+    content = _extract_content(event, event_type)
+    return TranscriptEvent(role=role, content=content, event_type=event_type, raw=event)
+
+
+def _extract_content(event: dict, event_type: str) -> str:
+    """Extract human-readable content from a Claude Code stream-json event."""
+    if event_type == "assistant" and "message" in event:
+        parts = []
+        for block in event["message"].get("content", []):
+            if not isinstance(block, dict):
+                continue
+            block_type = block.get("type")
+            if block_type == "text":
+                parts.append(block.get("text", ""))
+            elif block_type == "thinking":
+                parts.append(f"[thinking] {block.get('thinking', '')}")
+            elif block_type == "tool_use":
+                parts.append(
+                    f"[tool_use] {block.get('name', '?')}"
+                    f"({json.dumps(block.get('input', {}))})"
+                )
+            elif block_type == "tool_result":
+                result_content = block.get("content", "")
+                if isinstance(result_content, list):
+                    result_content = " ".join(
+                        b.get("text", "") for b in result_content if isinstance(b, dict)
+                    )
+                parts.append(f"[tool_result] {result_content}")
+        return "\n".join(parts) if parts else json.dumps(event)
+
+    if event_type == "user" and "message" in event:
+        # Tool results come back as user messages with content blocks
+        parts = []
+        for block in event["message"].get("content", []):
+            if not isinstance(block, dict):
+                continue
+            block_type = block.get("type")
+            if block_type == "tool_result":
+                result_content = block.get("content", "")
+                if isinstance(result_content, list):
+                    result_content = " ".join(
+                        b.get("text", "") for b in result_content if isinstance(b, dict)
+                    )
+                parts.append(f"[tool_result:{block.get('tool_use_id', '?')}] {result_content}")
+            else:
+                parts.append(json.dumps(block))
+        return "\n".join(parts) if parts else json.dumps(event)
+
+    if event_type == "result":
+        return event.get("result", "")
+
+    if event_type == "system":
+        subtype = event.get("subtype", "")
+        return f"[system:{subtype}]" if subtype else "[system]"
+
+    if event_type == "rate_limit_event":
+        info = event.get("rate_limit_info", {})
+        return f"[rate_limit] status={info.get('status', '?')} resets_at={info.get('resetsAt', '?')}"
+
+    # Catch-all: preserve full event as JSON so nothing is lost
+    return json.dumps(event)

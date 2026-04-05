@@ -15,7 +15,7 @@ from cambium.adapters.base import AdapterInstanceRegistry, AdapterType, RunResul
 from cambium.models.message import Message
 from cambium.models.routine import Routine
 from cambium.server.auth import create_session_token
-from cambium.session.model import Session, SessionMessage, SessionStatus, SessionType
+from cambium.session.model import Session, SessionMessage, SessionStatus, SessionType, TranscriptEvent
 from cambium.session.store import SessionStore
 
 
@@ -44,6 +44,7 @@ class RoutineRunner:
         user_message: str | None = None,
         live: bool = True,
         on_event: Callable[[dict[str, Any]], None] | None = None,
+        store_transcript: bool = True,
     ) -> RunResult:
         """Execute a routine for a given message.
 
@@ -113,6 +114,26 @@ class RoutineRunner:
             session_dir = self.user_dir / "data" / "sessions" / session_id
             session_dir.mkdir(parents=True, exist_ok=True)
 
+        # Build transcript callback — persists adapter-produced TranscriptEvents.
+        # The runner never inspects event contents; the adapter owns the translation.
+        on_raw_event = None
+        _raw_event_count = [0]
+        if self.session_store and store_transcript:
+            _seq = [self.session_store.next_sequence(session_id)]
+
+            def on_raw_event(te: TranscriptEvent) -> None:
+                self.session_store.add_message(
+                    SessionMessage.create(
+                        session_id,
+                        role=te.role,
+                        content=te.content,
+                        sequence=_seq[0],
+                        metadata={"event_type": te.event_type, "raw": te.raw},
+                    )
+                )
+                _seq[0] += 1
+                _raw_event_count[0] += 1
+
         # Execute
         result = adapter.send_message(
             instance=instance,
@@ -122,21 +143,24 @@ class RoutineRunner:
             api_base_url=self.api_base_url,
             live=live,
             on_event=on_event,
+            on_raw_event=on_raw_event,
             cwd=session_dir,
         )
 
-        # Store result and update session
-        if self.session_store:
-            if result.output:
-                seq = self.session_store.next_sequence(session_id)
-                self.session_store.add_message(
-                    SessionMessage.create(
-                        session_id, "assistant", result.output, sequence=seq,
-                        metadata={"duration_seconds": result.duration_seconds},
-                    )
+        # If no raw events were captured but we have output, store it as a
+        # fallback assistant message (covers adapters that don't emit raw events)
+        if self.session_store and result.output and _raw_event_count[0] == 0:
+            seq = self.session_store.next_sequence(session_id)
+            self.session_store.add_message(
+                SessionMessage.create(
+                    session_id, "assistant", result.output, sequence=seq,
+                    metadata={"duration_seconds": result.duration_seconds, "fallback": True},
                 )
-            if is_new_session:
-                status = SessionStatus.COMPLETED if result.success else SessionStatus.FAILED
-                self.session_store.update_status(session_id, status)
+            )
+
+        # Update session status
+        if self.session_store and is_new_session:
+            status = SessionStatus.COMPLETED if result.success else SessionStatus.FAILED
+            self.session_store.update_status(session_id, status)
 
         return result

@@ -9,6 +9,20 @@ from enum import Enum
 from typing import Any
 
 
+@dataclass(frozen=True)
+class TranscriptEvent:
+    """Adapter-agnostic transcript event for persistence.
+
+    Each adapter translates its native events into this shape. The runner
+    persists these blindly — it never inspects ``raw`` or parses ``content``.
+    """
+
+    role: str  # assistant, user, system, tool, etc.
+    content: str  # human-readable summary (adapter-produced)
+    event_type: str  # adapter-specific type label (e.g. "assistant", "system")
+    raw: dict = field(default_factory=dict)  # full original event, opaque to runner
+
+
 class SessionType(str, Enum):
     ONE_SHOT = "one_shot"
     INTERACTIVE = "interactive"

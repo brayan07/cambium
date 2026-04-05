@@ -15,7 +15,7 @@ class FakeAdapter(AdapterType):
         self.last_call = None
 
     def send_message(self, instance, user_message, session_id, session_token="",
-                     api_base_url="", live=True, on_event=None, cwd=None):
+                     api_base_url="", live=True, on_event=None, on_raw_event=None, cwd=None):
         self.last_call = {
             "instance": instance,
             "user_message": user_message,
