@@ -52,12 +52,14 @@ The fundamental unit of communication. Travels through named **channels**.
 
 ```
 Message
-├── id: UUID
+├── id: str               # Generated from uuid4()
 ├── channel: str          # e.g., "tasks", "completions"
 ├── payload: dict         # Arbitrary JSON data
 ├── source: str           # Who published it
 ├── status: pending → in_flight → done | failed
-└── attempts: int         # Retry count (max 3)
+├── attempts: int         # Retry count (max 3)
+├── timestamp: datetime
+└── claimed_at: datetime | None
 ```
 
 ### Routine
@@ -93,7 +95,8 @@ Runtime abstraction — how to execute an adapter instance. Currently one implem
 
 ```
 AdapterType (ABC)
-├── send_message(instance, message, session_id, ...) → RunResult
+├── send_message(instance, user_message, session_id, session_token,
+│                api_base_url, live, on_event, on_raw_event, cwd) → RunResult
 │   Callbacks:
 │   ├── on_event(chunk)        # OpenAI-format SSE chunks → broadcaster
 │   └── on_raw_event(event)    # TranscriptEvent → session store
@@ -106,28 +109,32 @@ Tracks a single execution context. Two types:
 
 | Type | Created by | Lifecycle |
 |------|-----------|-----------|
-| ONE_SHOT | Consumer loop | Message arrives → session created → adapter runs → COMPLETED/FAILED |
+| ONE_SHOT | Consumer loop | Message arrives → session created (ACTIVE) → adapter runs → COMPLETED/FAILED |
 | INTERACTIVE | Session API | Client creates → sends messages → observes via SSE → closes |
 
 ```mermaid
 stateDiagram-v2
     [*] --> CREATED
-    CREATED --> ACTIVE: adapter starts / first message sent
+    CREATED --> ACTIVE: one-shot: immediate / interactive: first message
     ACTIVE --> COMPLETED: success
     ACTIVE --> FAILED: error / max retries
     COMPLETED --> [*]
     FAILED --> [*]
+
+    note right of CREATED: One-shot sessions skip CREATED —\nstored directly as ACTIVE.\nInteractive sessions persist CREATED\nuntil first message.
 ```
 
 ```
 Session
-├── id: UUID
+├── id: str               # Generated from uuid4()
 ├── type: ONE_SHOT | INTERACTIVE
 ├── status: CREATED → ACTIVE → COMPLETED | FAILED
 ├── routine_name, adapter_instance_name
-├── working_dir: ~/.cambium/data/sessions/{id}/
-└── messages: [SessionMessage]   # Full transcript
+├── metadata: dict        # Arbitrary session metadata
+└── created_at, updated_at: datetime
 ```
+
+Note: `working_dir` (`~/.cambium/data/sessions/{id}/`) is computed at runtime by the RoutineRunner, not stored on the Session model. Messages are stored separately in the `session_messages` table via `SessionStore`.
 
 ### Skill
 
@@ -245,10 +252,11 @@ sequenceDiagram
     Q-->>CL: [Message] (status → in_flight)
 
     CL->>RR: send_message(routine, message, session_id)
-    RR->>SS: create session (CREATED)
+    RR->>SS: create session (ACTIVE)
     Note over RR: resolve instance, issue JWT,<br/>create working dir
+    RR->>SS: store user message as SessionMessage
 
-    RR->>Ad: send_message(instance, msg, session_id)
+    RR->>Ad: send_message(instance, user_message, session_id)
     Ad->>Ad: build skills dir, write .mcp.json
     Ad->>CC: spawn subprocess (stdin: user message)
 
@@ -277,7 +285,7 @@ All user state lives in `~/.cambium/`, bootstrapped by `cambium init`.
 ~/.cambium/
 ├── config.yaml                     # Framework config (db path, queue adapter)
 ├── constitution.md                 # User's values, goals, priorities
-├── mcp-servers.json                # MCP server registry
+├── mcp-servers.json                # MCP server registry (user-created, not seeded by init)
 │
 ├── routines/                       # Channel → adapter bindings
 │   ├── triage.yaml
@@ -297,11 +305,13 @@ All user state lives in `~/.cambium/`, bootstrapped by `cambium init`.
 │       │   ├── triage.md
 │       │   ├── execution.md
 │       │   └── ...
-│       └── skills/                 # User's custom skills (override defaults)
+│       └── skills/                 # Seeded with cambium-api; user adds custom skills here
 │
 ├── data/
 │   ├── cambium.db                  # SQLite (messages + sessions + transcripts)
-│   └── sessions/{session_id}/      # Working dir per execution
+│   ├── sessions/{session_id}/      # Working dir per execution
+│   ├── memory/                     # User memory/context (reserved, not yet integrated)
+│   └── logs/                       # Execution logs (reserved, not yet integrated)
 │
 ├── knowledge/                      # Knowledge base (user-managed)
 └── .git/                           # Version-controlled for backup
@@ -408,6 +418,7 @@ The long-term vision. Not yet implemented, but the architecture is designed for 
 graph TD
     User["User Session"] -->|feedback, goals| Triage
     Schedule["Schedule (cron)"] --> Triage
+    Schedule -->|schedule| Reflection
     Triage -->|plans| Planning
     Triage -->|tasks| Execution
     Triage -->|reflections| Reflection
