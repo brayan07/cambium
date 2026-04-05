@@ -73,24 +73,24 @@ class RoutineRunner:
             )
 
         # Create or reuse session
-        is_new_session = session_id is None
-        if is_new_session:
+        if session_id is None:
             session_id = str(uuid.uuid4())
 
-        if self.session_store and is_new_session:
-            session = Session.create(
-                origin=SessionOrigin.SYSTEM,
-                routine_name=routine.name,
-                adapter_instance_name=routine.adapter_instance,
-                metadata={"trigger_channel": message.channel, "trigger_message_id": message.id} if message else {},
-            )
-            session.id = session_id
-            session.status = SessionStatus.ACTIVE
-            self.session_store.create_session(session)
-        elif self.session_store and not is_new_session:
-            # Interactive session: activate if still in CREATED status
+        if self.session_store:
             existing = self.session_store.get_session(session_id)
-            if existing and existing.status == SessionStatus.CREATED:
+            if existing is None:
+                # New session — create and persist
+                session = Session.create(
+                    origin=SessionOrigin.SYSTEM,
+                    routine_name=routine.name,
+                    adapter_instance_name=routine.adapter_instance,
+                    metadata={"trigger_channel": message.channel, "trigger_message_id": message.id} if message else {},
+                )
+                session.id = session_id
+                session.status = SessionStatus.ACTIVE
+                self.session_store.create_session(session)
+            elif existing.status == SessionStatus.CREATED:
+                # Existing session (e.g., from API): activate on first message
                 self.session_store.update_status(session_id, SessionStatus.ACTIVE)
 
         # Issue session token
@@ -159,7 +159,7 @@ class RoutineRunner:
             )
 
         # Update session status
-        if self.session_store and is_new_session:
+        if self.session_store:
             status = SessionStatus.COMPLETED if result.success else SessionStatus.FAILED
             self.session_store.update_status(session_id, status)
 
