@@ -79,6 +79,18 @@ def _get_deps():
 # --- Endpoints ---
 
 
+@router.get("", response_model=list[SessionResponse])
+def list_sessions(origin: str | None = None, status: str | None = None, limit: int = 50):
+    """List sessions, optionally filtered by origin and/or status."""
+    store, _, _, _ = _get_deps()
+
+    origin_filter = SessionOrigin(origin) if origin else None
+    status_filter = SessionStatus(status) if status else None
+
+    sessions = store.list_sessions(origin=origin_filter, status=status_filter, limit=limit)
+    return [_session_to_response(s) for s in sessions]
+
+
 @router.post("", response_model=SessionResponse, status_code=201)
 def create_session(body: CreateSessionRequest):
     """Create an interactive session."""
