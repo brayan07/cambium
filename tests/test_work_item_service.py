@@ -15,6 +15,11 @@ def _make_service() -> tuple[WorkItemService, WorkItemStore, SQLiteQueue]:
     return service, store, queue
 
 
+def _drain(queue: SQLiteQueue, channels: list[str]) -> None:
+    """Drain messages from channels to keep tests focused."""
+    queue.consume(channels, limit=50)
+
+
 class TestCreateItem:
     def test_create_publishes_to_plans(self):
         service, store, queue = _make_service()
@@ -33,7 +38,7 @@ class TestDecompose:
     def test_basic_decomposition(self):
         service, store, queue = _make_service()
         parent = service.create_item(title="Big task")
-        queue.consume(["plans"], limit=10)  # drain creation message
+        _drain(queue, ["plans"])
 
         _, children = service.decompose(
             parent.id,
@@ -59,7 +64,7 @@ class TestDecompose:
     def test_dollar_ref_dependencies(self):
         service, store, queue = _make_service()
         parent = service.create_item(title="Ordered work")
-        queue.consume(["plans"], limit=10)
+        _drain(queue, ["plans"])
 
         _, children = service.decompose(
             parent.id,
@@ -84,7 +89,7 @@ class TestDecompose:
     def test_invalid_dollar_ref_raises(self):
         service, _, queue = _make_service()
         parent = service.create_item(title="Bad refs")
-        queue.consume(["plans"], limit=10)
+        _drain(queue, ["plans"])
 
         with pytest.raises(ValueError, match="Invalid \\$N reference"):
             service.decompose(
@@ -102,48 +107,67 @@ class TestRollupAll:
     def test_auto_rollup_all_children(self):
         service, store, queue = _make_service()
         parent = service.create_item(title="Parent", completion_mode=CompletionMode.ALL)
-        queue.consume(["plans"], limit=10)
+        _drain(queue, ["plans"])
 
         _, children = service.decompose(
             parent.id, [{"title": "A"}, {"title": "B"}]
         )
-        queue.consume(["tasks"], limit=10)
+        _drain(queue, ["tasks"])
 
-        # Claim and complete first child — parent should NOT complete yet
+        # Complete and review first child — parent should NOT complete yet
         service.claim_item(children[0].id, session_id="s1", actor="executor")
-        queue.consume(["tasks"], limit=10)
         service.complete_item(children[0].id, "done A")
+        _drain(queue, ["completions"])
+        service.review_item(children[0].id, "accepted", actor="reviewer")
         assert store.get(parent.id).status != WorkItemStatus.COMPLETED
 
-        # Claim and complete second child — parent should auto-complete
+        # Complete and review second child — parent should auto-complete
         service.claim_item(children[1].id, session_id="s2", actor="executor")
-        queue.consume(["tasks"], limit=10)
         service.complete_item(children[1].id, "done B")
+        _drain(queue, ["completions"])
+        service.review_item(children[1].id, "accepted", actor="reviewer")
         p = store.get(parent.id)
         assert p.status == WorkItemStatus.COMPLETED
         assert "done A" in p.result
         assert "done B" in p.result
+        # Auto-rollup parent inherits review trust
+        assert p.reviewed_by == "auto_rollup"
+
+    def test_completed_but_unreviewed_does_not_rollup(self):
+        """Parent should NOT complete when children are completed but not reviewed."""
+        service, store, queue = _make_service()
+        parent = service.create_item(title="Parent")
+        _drain(queue, ["plans"])
+
+        _, children = service.decompose(parent.id, [{"title": "Only child"}])
+        _drain(queue, ["tasks"])
+
+        service.claim_item(children[0].id, session_id="s1", actor="executor")
+        service.complete_item(children[0].id, "done")
+
+        # Child is completed but not reviewed — parent stays pending
+        assert store.get(children[0].id).status == WorkItemStatus.COMPLETED
+        assert store.get(children[0].id).reviewed_by is None
+        assert store.get(parent.id).status != WorkItemStatus.COMPLETED
 
     def test_recursive_rollup(self):
         service, store, queue = _make_service()
         root = service.create_item(title="Root")
-        queue.consume(["plans"], limit=10)
+        _drain(queue, ["plans"])
 
         _, mid = service.decompose(root.id, [{"title": "Mid"}])
-        queue.consume(["tasks"], limit=10)
-        # Mid is now ready — make it pending again so we can decompose it
-        # Actually, mid is ready and has no children. Let's decompose it directly.
-        # To decompose, we need to claim it first (or it's ready).
-        # Actually, decompose doesn't care about status — it just adds children.
+        _drain(queue, ["tasks"])
         _, leaves = service.decompose(mid[0].id, [{"title": "Leaf"}])
-        queue.consume(["tasks"], limit=10)
+        _drain(queue, ["tasks"])
 
         service.claim_item(leaves[0].id, session_id="s1", actor="executor")
-        queue.consume(["tasks"], limit=10)
         service.complete_item(leaves[0].id, "leaf done")
+        _drain(queue, ["completions"])
+        service.review_item(leaves[0].id, "accepted", actor="reviewer")
 
-        # Mid should auto-complete
+        # Mid should auto-complete (and inherit review trust)
         assert store.get(mid[0].id).status == WorkItemStatus.COMPLETED
+        assert store.get(mid[0].id).reviewed_by == "auto_rollup"
         # Root should auto-complete
         assert store.get(root.id).status == WorkItemStatus.COMPLETED
 
@@ -154,34 +178,44 @@ class TestRollupAny:
         parent = service.create_item(
             title="Race", completion_mode=CompletionMode.ANY
         )
-        queue.consume(["plans"], limit=10)
+        _drain(queue, ["plans"])
 
         _, children = service.decompose(
             parent.id, [{"title": "A"}, {"title": "B"}]
         )
-        queue.consume(["tasks"], limit=10)
+        _drain(queue, ["tasks"])
 
         service.claim_item(children[0].id, session_id="s1", actor="executor")
-        queue.consume(["tasks"], limit=10)
         service.complete_item(children[0].id, "A wins")
+        _drain(queue, ["completions"])
+        service.review_item(children[0].id, "accepted", actor="reviewer")
         assert store.get(parent.id).status == WorkItemStatus.COMPLETED
 
 
 class TestSynthesizeRollup:
-    def test_synthesize_publishes_to_plans(self):
+    def test_synthesize_publishes_to_plans_after_review(self):
+        """Synthesize triggers after review — planner shouldn't synthesize unreviewed work."""
         service, store, queue = _make_service()
         parent = service.create_item(
             title="Synthesize parent",
             rollup_mode=RollupMode.SYNTHESIZE,
         )
-        queue.consume(["plans"], limit=10)
+        _drain(queue, ["plans"])
 
         _, children = service.decompose(parent.id, [{"title": "Only child"}])
-        queue.consume(["tasks"], limit=10)
+        _drain(queue, ["tasks"])
 
         service.claim_item(children[0].id, session_id="s1", actor="executor")
-        queue.consume(["tasks"], limit=10)
         service.complete_item(children[0].id, "child result")
+        _drain(queue, ["completions"])
+
+        # Before review — no synthesize message yet
+        msgs = queue.consume(["plans"], limit=10)
+        synthesize_msgs = [m for m in msgs if m.payload.get("action") == "synthesize"]
+        assert len(synthesize_msgs) == 0
+
+        # Review triggers synthesize
+        service.review_item(children[0].id, "accepted", actor="reviewer")
 
         # Parent should NOT be completed — planner must synthesize
         assert store.get(parent.id).status != WorkItemStatus.COMPLETED
@@ -199,16 +233,15 @@ class TestFailRetry:
     def test_fail_under_max_retries_to_ready(self):
         service, store, queue = _make_service()
         parent = service.create_item(title="Parent")
-        queue.consume(["plans"], limit=10)
+        _drain(queue, ["plans"])
 
         _, children = service.decompose(
             parent.id, [{"title": "Retry task", "max_attempts": 3}]
         )
-        queue.consume(["tasks"], limit=10)
+        _drain(queue, ["tasks"])
 
         # Claim and fail
         service.claim_item(children[0].id, session_id="s1", actor="executor")
-        queue.consume(["tasks"], limit=10)
         result = service.fail_item(children[0].id, "oops", actor="executor")
 
         # Should be back to ready for retry
@@ -223,16 +256,15 @@ class TestFailPermanent:
     def test_fail_at_max_attempts_stays_failed(self):
         service, store, queue = _make_service()
         parent = service.create_item(title="Parent")
-        queue.consume(["plans"], limit=10)
+        _drain(queue, ["plans"])
 
         _, children = service.decompose(
             parent.id, [{"title": "Fragile", "max_attempts": 1}]
         )
-        queue.consume(["tasks"], limit=10)
+        _drain(queue, ["tasks"])
 
         # Claim (increments attempt_count to 1 = max_attempts)
         service.claim_item(children[0].id, session_id="s1", actor="executor")
-        queue.consume(["tasks"], limit=10)
 
         result = service.fail_item(children[0].id, "dead", actor="executor")
         assert result.status == WorkItemStatus.FAILED
@@ -243,37 +275,48 @@ class TestFailPermanent:
 
 
 class TestReview:
-    def test_accepted_triggers_rollup(self):
+    def test_accepted_sets_reviewed_fields(self):
         service, store, queue = _make_service()
         parent = service.create_item(title="Reviewable")
-        queue.consume(["plans"], limit=10)
+        _drain(queue, ["plans"])
 
         _, children = service.decompose(parent.id, [{"title": "Child"}])
-        queue.consume(["tasks"], limit=10)
+        _drain(queue, ["tasks"])
 
         service.claim_item(children[0].id, session_id="s1", actor="executor")
-        queue.consume(["tasks"], limit=10)
         service.complete_item(children[0].id, "done")
+        _drain(queue, ["completions"])
 
-        # Parent auto-completed (rollup already ran in complete_item)
+        # Before review: no reviewed_by
+        assert store.get(children[0].id).reviewed_by is None
+
+        service.review_item(children[0].id, "accepted", actor="reviewer")
+
+        # After review: reviewed_by set, parent auto-completed
+        child = store.get(children[0].id)
+        assert child.reviewed_by == "reviewer"
+        assert child.reviewed_at is not None
         assert store.get(parent.id).status == WorkItemStatus.COMPLETED
 
     def test_rejected_retries(self):
         service, store, queue = _make_service()
         item = service.create_item(title="Review me", max_attempts=3)
-        queue.consume(["plans"], limit=10)
+        _drain(queue, ["plans"])
 
         # Move to ready, claim, complete
         store.update_status(item.id, WorkItemStatus.READY)
         service.claim_item(item.id, session_id="s1", actor="executor")
-        queue.consume(["tasks"], limit=10)
         service.complete_item(item.id, "first attempt")
+        _drain(queue, ["completions"])
 
         # Reject — should go back to ready
         result = service.review_item(
             item.id, verdict="rejected", feedback="Not good enough"
         )
         assert result.status == WorkItemStatus.READY
+
+        # reviewed_by should NOT be set on rejection
+        assert store.get(item.id).reviewed_by is None
 
         # Context should have rejection feedback
         got = store.get(item.id)
@@ -282,17 +325,17 @@ class TestReview:
     def test_invalid_verdict_raises(self):
         service, _, queue = _make_service()
         item = service.create_item(title="Item")
-        queue.consume(["plans"], limit=10)
+        _drain(queue, ["plans"])
 
         with pytest.raises(ValueError, match="Invalid verdict"):
             service.review_item(item.id, verdict="maybe")
 
 
 class TestDependencyResolution:
-    def test_completing_dep_unblocks_dependent(self):
+    def test_completing_and_reviewing_dep_unblocks_dependent(self):
         service, store, queue = _make_service()
         parent = service.create_item(title="Parent")
-        queue.consume(["plans"], limit=10)
+        _drain(queue, ["plans"])
 
         _, children = service.decompose(
             parent.id,
@@ -301,23 +344,25 @@ class TestDependencyResolution:
                 {"title": "Dependent", "depends_on": ["$0"]},
             ],
         )
-        queue.consume(["tasks"], limit=10)
+        _drain(queue, ["tasks"])
 
         # Dependent should be pending
         assert store.get(children[1].id).status == WorkItemStatus.PENDING
 
-        # Claim and complete the dependency
+        # Complete the dependency — dependent stays pending (not reviewed yet)
         service.claim_item(children[0].id, session_id="s1", actor="executor")
-        queue.consume(["tasks"], limit=10)
         service.complete_item(children[0].id, "dep done")
+        assert store.get(children[1].id).status == WorkItemStatus.PENDING
 
-        # Dependent should now be ready
+        # Review the dependency — NOW dependent becomes ready
+        _drain(queue, ["completions"])
+        service.review_item(children[0].id, "accepted", actor="reviewer")
         assert store.get(children[1].id).status == WorkItemStatus.READY
 
     def test_partial_deps_stay_pending(self):
         service, store, queue = _make_service()
         parent = service.create_item(title="Parent")
-        queue.consume(["plans"], limit=10)
+        _drain(queue, ["plans"])
 
         _, children = service.decompose(
             parent.id,
@@ -327,12 +372,13 @@ class TestDependencyResolution:
                 {"title": "C", "depends_on": ["$0", "$1"]},
             ],
         )
-        queue.consume(["tasks"], limit=10)
+        _drain(queue, ["tasks"])
 
-        # Complete only A
+        # Complete and review only A
         service.claim_item(children[0].id, session_id="s1", actor="executor")
-        queue.consume(["tasks"], limit=10)
         service.complete_item(children[0].id, "A done")
+        _drain(queue, ["completions"])
+        service.review_item(children[0].id, "accepted", actor="reviewer")
 
         # C still pending — needs B too
         assert store.get(children[2].id).status == WorkItemStatus.PENDING
@@ -342,7 +388,7 @@ class TestCancelWithRollup:
     def test_cancel_item(self):
         service, store, queue = _make_service()
         item = service.create_item(title="Cancellable")
-        queue.consume(["plans"], limit=10)
+        _drain(queue, ["plans"])
 
         service.cancel_item(item.id, actor="coordinator")
         assert store.get(item.id).status == WorkItemStatus.CANCELED
@@ -355,11 +401,10 @@ class TestBlockUnblock:
     def test_block_and_unblock(self):
         service, store, queue = _make_service()
         item = service.create_item(title="Blockable")
-        queue.consume(["plans"], limit=10)
+        _drain(queue, ["plans"])
 
         store.update_status(item.id, WorkItemStatus.READY)
         service.claim_item(item.id, session_id="s1", actor="executor")
-        queue.consume(["tasks"], limit=10)
 
         service.block_item(item.id, reason="Waiting for API key")
         assert store.get(item.id).status == WorkItemStatus.BLOCKED

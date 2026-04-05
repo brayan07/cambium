@@ -44,6 +44,8 @@ class WorkItemStore:
                 session_id TEXT,
                 max_attempts INTEGER NOT NULL DEFAULT 3,
                 attempt_count INTEGER NOT NULL DEFAULT 0,
+                reviewed_by TEXT,
+                reviewed_at TEXT,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             );
@@ -123,8 +125,10 @@ class WorkItemStore:
             session_id=row[12],
             max_attempts=row[13],
             attempt_count=row[14],
-            created_at=row[15],
-            updated_at=row[16],
+            reviewed_by=row[15],
+            reviewed_at=row[16],
+            created_at=row[17],
+            updated_at=row[18],
         )
 
     def _row_to_event(self, row: tuple) -> WorkItemEvent:
@@ -141,7 +145,8 @@ class WorkItemStore:
     _ITEM_COLS = (
         "id, title, description, status, parent_id, priority, "
         "completion_mode, rollup_mode, depends_on, context, result, "
-        "actor, session_id, max_attempts, attempt_count, created_at, updated_at"
+        "actor, session_id, max_attempts, attempt_count, "
+        "reviewed_by, reviewed_at, created_at, updated_at"
     )
 
     _EVENT_COLS = "id, item_id, event_type, actor, session_id, data, created_at"
@@ -153,26 +158,8 @@ class WorkItemStore:
         try:
             cur.execute(
                 f"INSERT INTO work_items ({self._ITEM_COLS}) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (
-                    item.id,
-                    item.title,
-                    item.description,
-                    item.status.value,
-                    item.parent_id,
-                    item.priority,
-                    item.completion_mode.value,
-                    item.rollup_mode.value,
-                    json.dumps(item.depends_on),
-                    json.dumps(item.context),
-                    item.result,
-                    item.actor,
-                    item.session_id,
-                    item.max_attempts,
-                    item.attempt_count,
-                    item.created_at,
-                    item.updated_at,
-                ),
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                self._item_to_params(item),
             )
             self._emit_event(
                 cur,
@@ -186,6 +173,29 @@ class WorkItemStore:
         except Exception:
             self._conn.rollback()
             raise
+
+    def _item_to_params(self, item: WorkItem) -> tuple:
+        return (
+            item.id,
+            item.title,
+            item.description,
+            item.status.value,
+            item.parent_id,
+            item.priority,
+            item.completion_mode.value,
+            item.rollup_mode.value,
+            json.dumps(item.depends_on),
+            json.dumps(item.context),
+            item.result,
+            item.actor,
+            item.session_id,
+            item.max_attempts,
+            item.attempt_count,
+            item.reviewed_by,
+            item.reviewed_at,
+            item.created_at,
+            item.updated_at,
+        )
 
     def get(self, item_id: str) -> WorkItem | None:
         row = self._conn.execute(
@@ -379,6 +389,35 @@ class WorkItemStore:
             self._conn.rollback()
             raise
 
+    def set_reviewed(
+        self,
+        item_id: str,
+        reviewed_by: str,
+        actor: str | None = None,
+        session_id: str | None = None,
+    ) -> None:
+        """Mark an item as reviewed."""
+        now = self._now()
+        cur = self._conn.cursor()
+        try:
+            cur.execute(
+                "UPDATE work_items SET reviewed_by = ?, reviewed_at = ?, updated_at = ? "
+                "WHERE id = ?",
+                (reviewed_by, now, now, item_id),
+            )
+            self._emit_event(
+                cur,
+                item_id,
+                "reviewed",
+                data={"reviewed_by": reviewed_by, "verdict": "accepted"},
+                actor=actor,
+                session_id=session_id,
+            )
+            self._conn.commit()
+        except Exception:
+            self._conn.rollback()
+            raise
+
     def update_context(
         self,
         item_id: str,
@@ -553,26 +592,8 @@ class WorkItemStore:
                 child.parent_id = parent_id
                 cur.execute(
                     f"INSERT INTO work_items ({self._ITEM_COLS}) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    (
-                        child.id,
-                        child.title,
-                        child.description,
-                        child.status.value,
-                        child.parent_id,
-                        child.priority,
-                        child.completion_mode.value,
-                        child.rollup_mode.value,
-                        json.dumps(child.depends_on),
-                        json.dumps(child.context),
-                        child.result,
-                        child.actor,
-                        child.session_id,
-                        child.max_attempts,
-                        child.attempt_count,
-                        child.created_at,
-                        child.updated_at,
-                    ),
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    self._item_to_params(child),
                 )
                 self._emit_event(
                     cur,

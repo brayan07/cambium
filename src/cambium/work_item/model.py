@@ -62,6 +62,8 @@ class WorkItem:
     session_id: str | None
     max_attempts: int
     attempt_count: int
+    reviewed_by: str | None
+    reviewed_at: str | None
     created_at: str
     updated_at: str
 
@@ -97,6 +99,8 @@ class WorkItem:
             session_id=session_id,
             max_attempts=max_attempts,
             attempt_count=0,
+            reviewed_by=None,
+            reviewed_at=None,
             created_at=now,
             updated_at=now,
         )

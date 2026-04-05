@@ -77,6 +77,8 @@ class WorkItemResponse(BaseModel):
     session_id: str | None
     max_attempts: int
     attempt_count: int
+    reviewed_by: str | None
+    reviewed_at: str | None
     created_at: str
     updated_at: str
 
@@ -141,6 +143,8 @@ def _item_to_response(item) -> WorkItemResponse:
         session_id=item.session_id,
         max_attempts=item.max_attempts,
         attempt_count=item.attempt_count,
+        reviewed_by=item.reviewed_by,
+        reviewed_at=item.reviewed_at,
         created_at=item.created_at,
         updated_at=item.updated_at,
     )

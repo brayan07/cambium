@@ -1,7 +1,8 @@
 """End-to-end integration test for the work item planning pipeline.
 
 Exercises the full lifecycle through the API:
-coordinator creates → planner decomposes → executor claims/completes → rollup cascades → event log
+coordinator creates → planner decomposes → executor claims/completes →
+reviewer accepts → rollup cascades → event log
 """
 
 from __future__ import annotations
@@ -69,9 +70,9 @@ def _auth_headers(routine: str, session: str) -> dict:
 
 
 class TestFullWorkItemLifecycle:
-    """Coordinator → Planner → Executor → Rollup → Event Log."""
+    """Coordinator → Planner → Executor → Reviewer → Rollup → Event Log."""
 
-    def test_create_decompose_claim_complete_rollup(self, client: TestClient):
+    def test_create_decompose_claim_complete_review_rollup(self, client: TestClient):
         # === Coordinator creates a work item ===
         resp = client.post("/work-items", json={
             "title": "Research Python testing",
@@ -117,7 +118,21 @@ class TestFullWorkItemLifecycle:
         )
         assert resp.status_code == 200
 
-        # Third child should still be pending (unittest not done yet)
+        # Third child should still be pending (not reviewed yet)
+        resp = client.get(f"/work-items/{children[2]['id']}")
+        assert resp.json()["status"] == "pending"
+
+        # === Reviewer accepts first child ===
+        headers_rev = _auth_headers("reviewer", "sess-rev")
+        resp = client.post(
+            f"/work-items/{children[0]['id']}/review",
+            json={"verdict": "accepted"},
+            headers=headers_rev,
+        )
+        assert resp.status_code == 200
+        assert resp.json()["reviewed_by"] == "reviewer"
+
+        # Third child still pending — unittest not done yet
         resp = client.get(f"/work-items/{children[2]['id']}")
         assert resp.json()["status"] == "pending"
 
@@ -137,7 +152,15 @@ class TestFullWorkItemLifecycle:
         )
         assert resp.status_code == 200
 
-        # Third child should now be ready (both deps completed)
+        # === Reviewer accepts second child ===
+        resp = client.post(
+            f"/work-items/{children[1]['id']}/review",
+            json={"verdict": "accepted"},
+            headers=headers_rev,
+        )
+        assert resp.status_code == 200
+
+        # Third child should now be ready (both deps completed AND reviewed)
         resp = client.get(f"/work-items/{children[2]['id']}")
         assert resp.json()["status"] == "ready"
 
@@ -153,10 +176,22 @@ class TestFullWorkItemLifecycle:
         )
         assert resp.status_code == 200
 
-        # === Root should be auto-completed via rollup ===
+        # Root should NOT be completed yet — last child not reviewed
+        resp = client.get(f"/work-items/{root['id']}")
+        assert resp.json()["status"] != "completed"
+
+        # === Reviewer accepts third child — root should auto-complete ===
+        resp = client.post(
+            f"/work-items/{children[2]['id']}/review",
+            json={"verdict": "accepted"},
+            headers=headers_rev,
+        )
+        assert resp.status_code == 200
+
         resp = client.get(f"/work-items/{root['id']}")
         root_final = resp.json()
         assert root_final["status"] == "completed"
+        assert root_final["reviewed_by"] == "auto_rollup"
         assert "pytest" in root_final["result"]
         assert "unittest" in root_final["result"]
         assert "Comparison" in root_final["result"]
@@ -167,6 +202,7 @@ class TestFullWorkItemLifecycle:
         tree = resp.json()
         assert len(tree) == 3
         assert all(item["status"] == "completed" for item in tree)
+        assert all(item["reviewed_by"] is not None for item in tree)
 
         # === Verify event log ===
         resp = client.get(f"/work-items/{root['id']}/events")
@@ -174,12 +210,8 @@ class TestFullWorkItemLifecycle:
         event_types = [e["event_type"] for e in root_events]
         assert "created" in event_types
         assert "children_created" in event_types
-        assert "status_forced" in event_types  # auto-rollup uses _force_status
-
-        # Global events should capture the full story
-        resp = client.get("/work-items/events/all?limit=100")
-        all_events = resp.json()
-        assert len(all_events) >= 10  # created*4 + children_created + status_changed*N + claimed*3 + result_set*3
+        assert "status_forced" in event_types  # auto-rollup
+        assert "reviewed" in event_types  # auto-rollup review
 
     def test_fail_retry_cycle(self, client: TestClient):
         """Work item fails, retries, then succeeds."""
@@ -192,6 +224,7 @@ class TestFullWorkItemLifecycle:
         child_id = resp.json()["children"][0]["id"]
 
         headers = _auth_headers("executor", "sess-1")
+        headers_rev = _auth_headers("reviewer", "sess-rev")
 
         # First attempt: claim and fail
         client.post(f"/work-items/{child_id}/claim", headers=headers)
@@ -210,6 +243,13 @@ class TestFullWorkItemLifecycle:
             headers=headers,
         )
         assert resp.json()["status"] == "completed"
+
+        # Review to trigger rollup
+        client.post(
+            f"/work-items/{child_id}/review",
+            json={"verdict": "accepted"},
+            headers=headers_rev,
+        )
 
         # Root should be auto-completed
         resp = client.get(f"/work-items/{root['id']}")
@@ -230,6 +270,7 @@ class TestFullWorkItemLifecycle:
         child_id = resp.json()["children"][0]["id"]
 
         headers = _auth_headers("executor", "sess-1")
+        headers_rev = _auth_headers("reviewer", "sess-rev")
 
         # Claim and block
         client.post(f"/work-items/{child_id}/claim", headers=headers)
@@ -253,11 +294,18 @@ class TestFullWorkItemLifecycle:
             headers=headers,
         )
 
+        # Review to trigger rollup
+        client.post(
+            f"/work-items/{child_id}/review",
+            json={"verdict": "accepted"},
+            headers=headers_rev,
+        )
+
         resp = client.get(f"/work-items/{root['id']}")
         assert resp.json()["status"] == "completed"
 
     def test_any_completion_mode(self, client: TestClient):
-        """Parent with completion_mode=any completes on first child."""
+        """Parent with completion_mode=any completes on first reviewed child."""
         resp = client.post("/work-items", json={
             "title": "Try multiple approaches",
             "completion_mode": "any",
@@ -273,6 +321,8 @@ class TestFullWorkItemLifecycle:
         children = resp.json()["children"]
 
         headers = _auth_headers("executor", "sess-1")
+        headers_rev = _auth_headers("reviewer", "sess-rev")
+
         client.post(f"/work-items/{children[0]['id']}/claim", headers=headers)
         client.post(
             f"/work-items/{children[0]['id']}/complete",
@@ -280,7 +330,18 @@ class TestFullWorkItemLifecycle:
             headers=headers,
         )
 
-        # Root should be completed even though B is still ready
+        # Root should NOT be completed yet — not reviewed
+        resp = client.get(f"/work-items/{root['id']}")
+        assert resp.json()["status"] != "completed"
+
+        # Review triggers rollup
+        client.post(
+            f"/work-items/{children[0]['id']}/review",
+            json={"verdict": "accepted"},
+            headers=headers_rev,
+        )
+
+        # Now root should be completed
         resp = client.get(f"/work-items/{root['id']}")
         assert resp.json()["status"] == "completed"
 

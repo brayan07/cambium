@@ -134,8 +134,20 @@ class WorkItemService:
         )
 
         item = self.store.get(item_id)
-        self._run_rollup(item_id, actor=actor, session_id=session_id)
-        self._resolve_dependents(item_id, actor=actor, session_id=session_id)
+
+        # Notify reviewer — rollup and dependency resolution happen on
+        # review acceptance, not here. This ensures the reviewer can
+        # reject before the parent auto-completes.
+        self.queue.publish(Message.create(
+            channel="completions",
+            payload={
+                "work_item_id": item_id,
+                "action": "completed",
+                "title": item.title,
+                "parent_id": item.parent_id,
+            },
+            source=actor or "system",
+        ))
 
         return item
 
@@ -190,7 +202,11 @@ class WorkItemService:
     ) -> WorkItem:
         """Review a completed item. verdict: 'accepted' or 'rejected'."""
         if verdict == "accepted":
-            # Already completed — just trigger rollup + dependents
+            # Mark as reviewed, then trigger rollup + dependents
+            self.store.set_reviewed(
+                item_id, reviewed_by=actor or "reviewer",
+                actor=actor, session_id=session_id,
+            )
             self._run_rollup(item_id, actor=actor, session_id=session_id)
             self._resolve_dependents(item_id, actor=actor, session_id=session_id)
         elif verdict == "rejected":
@@ -300,10 +316,12 @@ class WorkItemService:
             child.depends_on = resolved
 
     def _all_deps_completed(self, item: WorkItem) -> bool:
-        """Check if all dependencies of an item are completed."""
+        """Check if all dependencies are completed and reviewed."""
         for dep_id in item.depends_on:
             dep = self.store.get(dep_id)
             if dep is None or dep.status != WorkItemStatus.COMPLETED:
+                return False
+            if dep.reviewed_by is None:
                 return False
         return True
 
@@ -331,20 +349,26 @@ class WorkItemService:
             return
 
         children = self.store.get_children(parent.id)
+        # For auto-rollup, children must be both completed AND reviewed.
+        # For synthesize, we just need completion to trigger the synthesis request.
+        reviewed = [
+            c for c in children
+            if c.status == WorkItemStatus.COMPLETED and c.reviewed_by is not None
+        ]
         completed = [c for c in children if c.status == WorkItemStatus.COMPLETED]
 
-        should_complete = False
-        if parent.completion_mode == CompletionMode.ALL:
-            should_complete = len(completed) == len(children)
-        elif parent.completion_mode == CompletionMode.ANY:
-            should_complete = len(completed) >= 1
-
-        if not should_complete:
-            return
-
         if parent.rollup_mode == RollupMode.AUTO:
-            # Auto-complete the parent (container — bypasses normal lifecycle)
-            results = [c.result or "" for c in completed]
+            # Auto-rollup requires reviewed children — trust propagates upward
+            should_complete = False
+            if parent.completion_mode == CompletionMode.ALL:
+                should_complete = len(reviewed) == len(children)
+            elif parent.completion_mode == CompletionMode.ANY:
+                should_complete = len(reviewed) >= 1
+
+            if not should_complete:
+                return
+
+            results = [c.result or "" for c in reviewed]
             combined = "; ".join(r for r in results if r)
             self.store.set_result(
                 parent.id, combined, actor=actor, session_id=session_id
@@ -353,12 +377,17 @@ class WorkItemService:
                 parent.id, WorkItemStatus.COMPLETED, actor=actor, session_id=session_id,
                 reason="auto_rollup",
             )
+            # Auto-rollup parents inherit review trust from their children
+            self.store.set_reviewed(
+                parent.id, reviewed_by="auto_rollup",
+                actor=actor, session_id=session_id,
+            )
             self.queue.publish(Message.create(
                 channel="plans",
                 payload={
                     "work_item_id": parent.id,
                     "action": "auto_completed",
-                    "child_count": len(completed),
+                    "child_count": len(reviewed),
                 },
                 source=actor or "system",
             ))
@@ -367,7 +396,17 @@ class WorkItemService:
                 parent.id, actor=actor, session_id=session_id, depth=depth + 1
             )
         elif parent.rollup_mode == RollupMode.SYNTHESIZE:
-            # Ask planner to synthesize
+            # Synthesize triggers on completion (not review) — the synthesis
+            # result itself will need review before the parent is considered done.
+            should_synthesize = False
+            if parent.completion_mode == CompletionMode.ALL:
+                should_synthesize = len(completed) == len(children)
+            elif parent.completion_mode == CompletionMode.ANY:
+                should_synthesize = len(completed) >= 1
+
+            if not should_synthesize:
+                return
+
             self.queue.publish(Message.create(
                 channel="plans",
                 payload={
