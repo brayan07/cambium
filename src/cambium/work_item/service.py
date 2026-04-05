@@ -221,16 +221,8 @@ class WorkItemService:
         actor: str,
     ) -> WorkItem | None:
         claimed = self.store.claim(item_id, session_id=session_id, actor=actor)
-        if claimed:
-            self.queue.publish(Message.create(
-                channel="tasks",
-                payload={
-                    "work_item_id": item_id,
-                    "action": "claimed",
-                    "actor": actor,
-                },
-                source=actor,
-            ))
+        # No channel publish on claim — the event log records it, and publishing
+        # to "tasks" would create a spurious executor session for an already-active item.
         return claimed
 
     def block_item(
