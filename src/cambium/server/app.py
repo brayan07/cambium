@@ -6,9 +6,11 @@ import asyncio
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Any
 
 import jwt
 import uvicorn
+import yaml
 from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field
 
@@ -25,6 +27,7 @@ from cambium.server.auth import verify_session_token
 from cambium.server import sessions as sessions_module
 from cambium.session.broadcaster import BroadcasterRegistry
 from cambium.session.store import SessionStore
+from cambium.sources.base import EventSource
 
 log = logging.getLogger(__name__)
 
@@ -57,6 +60,7 @@ class HealthResponse(BaseModel):
     status: str
     consumer_running: bool
     pending_messages: int
+    sources: int = 0
 
 
 # --- Server state ---
@@ -69,26 +73,36 @@ class CambiumServer:
         routine_registry: RoutineRegistry,
         routine_runner: RoutineRunner,
         consumer: ConsumerLoop,
+        sources: list[EventSource] | None = None,
+        source_poll_interval: float = 10.0,
     ) -> None:
         self.queue = queue
         self.routine_registry = routine_registry
         self.routine_runner = routine_runner
         self.consumer = consumer
+        self.sources = sources or []
+        self.source_poll_interval = source_poll_interval
         self._consumer_task: asyncio.Task | None = None
+        self._source_task: asyncio.Task | None = None
 
     async def start_consumer(self) -> None:
         self._consumer_task = asyncio.create_task(self._run_consumer())
         log.info("Consumer loop started")
+        if self.sources:
+            self._source_task = asyncio.create_task(self._run_sources())
+            log.info("Source poller started (%d sources)", len(self.sources))
 
     async def stop_consumer(self) -> None:
-        if self._consumer_task:
-            self._consumer_task.cancel()
-            try:
-                await self._consumer_task
-            except asyncio.CancelledError:
-                pass
-            self._consumer_task = None
-            log.info("Consumer loop stopped")
+        for task in [self._consumer_task, self._source_task]:
+            if task:
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+        self._consumer_task = None
+        self._source_task = None
+        log.info("Consumer and source loops stopped")
 
     @property
     def consumer_running(self) -> bool:
@@ -105,6 +119,19 @@ class CambiumServer:
             except Exception:
                 log.exception("Consumer tick error")
             await asyncio.sleep(self.consumer.poll_interval)
+
+    async def _run_sources(self) -> None:
+        """Poll all registered event sources periodically."""
+        loop = asyncio.get_event_loop()
+        while True:
+            for source in self.sources:
+                try:
+                    count = await loop.run_in_executor(None, source.poll)
+                    if count:
+                        log.info("Source %s emitted %d events", type(source).__name__, count)
+                except Exception:
+                    log.exception("Source poll error (%s)", type(source).__name__)
+            await asyncio.sleep(self.source_poll_interval)
 
 
 # --- Module-level state ---
@@ -135,6 +162,38 @@ def _authenticate(authorization: str | None) -> dict:
         raise HTTPException(status_code=401, detail=f"Invalid token: {e}")
 
 
+def _load_config(user_dir: Path) -> dict[str, Any]:
+    """Load config.yaml from the user directory."""
+    config_path = user_dir / "config.yaml"
+    if config_path.exists():
+        with open(config_path) as f:
+            return yaml.safe_load(f) or {}
+    return {}
+
+
+def _build_sources(config: dict[str, Any], queue: SQLiteQueue) -> list[EventSource]:
+    """Instantiate event sources from config."""
+    sources: list[EventSource] = []
+    sources_config = config.get("sources", {})
+
+    if "clickup" in sources_config:
+        from cambium.sources.clickup_poller import ClickUpPoller
+        poller = ClickUpPoller(sources_config["clickup"], queue)
+        sources.append(poller)
+        log.info("ClickUp poller configured (team=%s)", sources_config["clickup"].get("team_id"))
+
+    if "schedule" in sources_config:
+        from cambium.sources.schedule import ScheduleSource
+        schedule = ScheduleSource(sources_config["schedule"], queue)
+        sources.append(schedule)
+        log.info(
+            "Schedule source configured (channel=%s, interval=%ds)",
+            schedule.channel, schedule.interval,
+        )
+
+    return sources
+
+
 def build_server(
     db_path: str | None = None,
     user_dir: Path | None = None,
@@ -148,6 +207,9 @@ def build_server(
     Run ``cambium init`` first to seed the user directory from framework defaults.
     """
     user_dir = user_dir or Path.home() / ".cambium"
+
+    # Load user config
+    config = _load_config(user_dir)
 
     # Queue
     if db_path is None:
@@ -207,9 +269,13 @@ def build_server(
         live=live,
     )
 
+    # Event sources
+    sources = _build_sources(config, queue) if live else []
+
     log.info(f"Skills: {skill_registry.names()}")
     log.info(f"Adapter instances: {[i.name for i in instance_registry.all()]}")
     log.info(f"Routines: {[r.name for r in routine_registry.all()]}")
+    log.info(f"Sources: {[type(s).__name__ for s in sources]}")
     log.info(f"Queue DB: {db_path}")
     log.info(f"Live mode: {live}")
 
@@ -218,6 +284,8 @@ def build_server(
         routine_registry=routine_registry,
         routine_runner=routine_runner,
         consumer=consumer,
+        sources=sources,
+        source_poll_interval=config.get("source_poll_interval", 10.0),
     )
 
 
@@ -320,6 +388,7 @@ def health():
         status="ok",
         consumer_running=server.consumer_running,
         pending_messages=server.queue.pending_count(),
+        sources=len(server.sources),
     )
 
 
