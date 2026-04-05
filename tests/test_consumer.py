@@ -95,7 +95,7 @@ class TestConsumerLoop:
 
         results = loop.tick()
         assert len(results) == 1
-        assert queue.pending_count() == 0
+        assert queue.pending_count(["other"]) == 0
 
     def test_max_ticks_stops_loop(self, tmp_path: Path):
         loop, _ = _make_loop(tmp_path, [

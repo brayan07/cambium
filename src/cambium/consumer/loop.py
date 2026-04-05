@@ -7,6 +7,7 @@ import time
 import uuid
 
 from cambium.adapters.base import RunResult
+from cambium.models.message import Message
 from cambium.models.routine import RoutineRegistry
 from cambium.queue.base import QueueAdapter
 from cambium.runner.routine_runner import RoutineRunner
@@ -65,6 +66,20 @@ class ConsumerLoop:
                         on_event=broadcaster.publish if broadcaster else None,
                     )
                     results.append(result)
+
+                    # Notify consolidator — but skip consolidator's own sessions
+                    # to avoid infinite recursion.
+                    if routine.name != "consolidator":
+                        self.queue.publish(Message.create(
+                            channel="sessions_completed",
+                            payload={
+                                "session_id": session_id,
+                                "routine_name": routine.name,
+                                "success": result.success,
+                                "trigger_channel": message.channel,
+                            },
+                            source="system",
+                        ))
 
                     if not result.success:
                         message_success = False
