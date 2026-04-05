@@ -207,7 +207,7 @@ class WorkItemService:
                 session_id=session_id,
             )
             # Revert to active so fail_item can do active → failed normally
-            self._force_status(item_id, WorkItemStatus.ACTIVE, actor, session_id)
+            self._force_status(item_id, WorkItemStatus.ACTIVE, actor, session_id, reason="review_rejection")
             return self.fail_item(item_id, f"Rejected: {feedback}", actor, session_id)
         else:
             raise ValueError(f"Invalid verdict: {verdict}. Use 'accepted' or 'rejected'.")
@@ -350,7 +350,8 @@ class WorkItemService:
                 parent.id, combined, actor=actor, session_id=session_id
             )
             self._force_status(
-                parent.id, WorkItemStatus.COMPLETED, actor=actor, session_id=session_id
+                parent.id, WorkItemStatus.COMPLETED, actor=actor, session_id=session_id,
+                reason="auto_rollup",
             )
             self.queue.publish(Message.create(
                 channel="plans",
@@ -409,8 +410,9 @@ class WorkItemService:
         status: WorkItemStatus,
         actor: str | None = None,
         session_id: str | None = None,
+        reason: str = "unspecified",
     ) -> None:
-        """Bypass state machine for special cases (e.g., rejection of completed item)."""
+        """Bypass state machine for special cases (rollup, review rejection)."""
         from datetime import datetime, timezone
 
         now = datetime.now(timezone.utc).isoformat()
@@ -425,7 +427,7 @@ class WorkItemService:
             cur,
             item_id,
             "status_forced",
-            data={"to": status.value, "reason": "review_rejection"},
+            data={"to": status.value, "reason": reason},
             actor=actor,
             session_id=session_id,
         )
