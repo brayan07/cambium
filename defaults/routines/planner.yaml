@@ -1,0 +1,4 @@
+name: planner
+adapter_instance: planner
+listen: [plans]
+publish: [tasks, input_needed]

@@ -9,8 +9,8 @@ class TestSessionStore:
         store = SessionStore()
         session = Session.create(
             session_type=SessionType.INTERACTIVE,
-            routine_name="interactive",
-            adapter_instance_name="interactive",
+            routine_name="interlocutor",
+            adapter_instance_name="interlocutor",
         )
         store.create_session(session)
         got = store.get_session(session.id)
@@ -18,7 +18,7 @@ class TestSessionStore:
         assert got.id == session.id
         assert got.type == SessionType.INTERACTIVE
         assert got.status == SessionStatus.CREATED
-        assert got.routine_name == "interactive"
+        assert got.routine_name == "interlocutor"
 
     def test_get_missing_session_returns_none(self):
         store = SessionStore()

@@ -68,7 +68,7 @@ class TestConsumerLoop:
     def test_message_matches_correct_routine(self, tmp_path: Path):
         loop, queue = _make_loop(tmp_path, [
             ("handler.yaml", "name: handler\nadapter_instance: basic\nlisten: [tasks]\n"),
-            ("other.yaml", "name: other\nadapter_instance: basic\nlisten: [reviews]\n"),
+            ("other.yaml", "name: other\nadapter_instance: basic\nlisten: [evaluations]\n"),
         ])
         queue.publish(Message.create(channel="tasks", payload={}, source="test"))
 

@@ -1,4 +1,0 @@
-name: reflection
-adapter_instance: reflection
-listen: [reviews, schedule, reflections]
-publish: [improvements]

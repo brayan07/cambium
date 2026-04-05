@@ -1,0 +1,4 @@
+name: coordinator
+adapter_instance: coordinator
+listen: [events, evaluations, reflections]
+publish: [plans, tasks, events, input_needed]

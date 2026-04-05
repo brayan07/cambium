@@ -36,7 +36,7 @@ def server(tmp_path: Path) -> CambiumServer:
     routines_dir.mkdir(parents=True)
     (routines_dir / "handler.yaml").write_text(
         "name: handler\nadapter_instance: handler\n"
-        "listen: [tasks, goals]\npublish: [results]\n"
+        "listen: [tasks, events]\npublish: [results]\n"
     )
 
     srv = build_server(

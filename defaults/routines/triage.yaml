@@ -1,4 +1,0 @@
-name: triage
-adapter_instance: triage
-listen: [goals, feedback, schedule]
-publish: [plans, tasks, reflections]

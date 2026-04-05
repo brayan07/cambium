@@ -75,31 +75,30 @@ class TestSkillRegistry:
 
 class TestMessage:
     def test_create(self):
-        msg = Message.create(channel="tasks", payload={"task": "test"}, source="triage")
+        msg = Message.create(channel="tasks", payload={"task": "test"}, source="coordinator")
         assert msg.channel == "tasks"
         assert msg.payload == {"task": "test"}
-        assert msg.source == "triage"
+        assert msg.source == "coordinator"
         assert msg.status == "pending"
         assert len(msg.id) == 36
 
 
 class TestRoutine:
     def test_from_file(self, tmp_path: Path):
-        p = tmp_path / "triage.yaml"
+        p = tmp_path / "coordinator.yaml"
         p.write_text(
-            "name: triage\n"
-            "adapter_instance: triage-agent\n"
+            "name: coordinator\n"
+            "adapter_instance: coordinator-agent\n"
             "listen:\n"
-            "  - goals\n"
-            "  - feedback\n"
+            "  - events\n"
             "publish:\n"
             "  - tasks\n"
             "  - plans\n"
         )
         r = Routine.from_file(p)
-        assert r.name == "triage"
-        assert r.adapter_instance == "triage-agent"
-        assert r.listen == ["goals", "feedback"]
+        assert r.name == "coordinator"
+        assert r.adapter_instance == "coordinator-agent"
+        assert r.listen == ["events"]
         assert r.publish == ["tasks", "plans"]
 
     def test_from_file_minimal(self, tmp_path: Path):
@@ -148,16 +147,16 @@ class TestRoutineRegistry:
 
 class TestAdapterInstance:
     def test_from_file(self, tmp_path: Path):
-        p = tmp_path / "triage.yaml"
+        p = tmp_path / "coordinator.yaml"
         p.write_text(
-            "name: triage\n"
+            "name: coordinator\n"
             "adapter_type: claude-code\n"
             "config:\n"
             "  model: haiku\n"
             "  skills: [cambium-api]\n"
         )
         inst = AdapterInstance.from_file(p)
-        assert inst.name == "triage"
+        assert inst.name == "coordinator"
         assert inst.adapter_type == "claude-code"
         assert inst.config["model"] == "haiku"
         assert inst.config["skills"] == ["cambium-api"]

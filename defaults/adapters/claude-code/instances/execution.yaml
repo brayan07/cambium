@@ -1,6 +1,0 @@
-name: execution
-adapter_type: claude-code
-config:
-  model: opus
-  system_prompt_path: adapters/claude-code/prompts/execution.md
-  skills: [cambium-api]

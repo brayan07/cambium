@@ -1,0 +1,4 @@
+name: interlocutor
+adapter_instance: interlocutor
+listen: [sessions]
+publish: [plans, tasks, events, input_needed]
