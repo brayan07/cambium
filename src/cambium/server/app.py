@@ -182,6 +182,15 @@ def _build_sources(config: dict[str, Any], queue: SQLiteQueue) -> list[EventSour
         sources.append(poller)
         log.info("ClickUp poller configured (team=%s)", sources_config["clickup"].get("team_id"))
 
+    if "schedule" in sources_config:
+        from cambium.sources.schedule import ScheduleSource
+        schedule = ScheduleSource(sources_config["schedule"], queue)
+        sources.append(schedule)
+        log.info(
+            "Schedule source configured (channel=%s, interval=%ds)",
+            schedule.channel, schedule.interval,
+        )
+
     return sources
 
 

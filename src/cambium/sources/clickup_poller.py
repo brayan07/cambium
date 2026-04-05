@@ -1,7 +1,7 @@
 """ClickUp polling source — watches task statuses and publishes queue events.
 
-Replaces the n8n grooming/execution polling loops with a single poller that
-maps ClickUp task statuses to Cambium channels.
+Replaces the n8n execution polling loop. Grooming is handled by the
+ScheduleSource triggering the triage routine on a timer.
 """
 
 from __future__ import annotations
@@ -50,17 +50,14 @@ class ClickUpPoller(EventSource):
         if not self._api_token:
             log.warning("ClickUp API token not set (env: %s)", token_env)
 
-        # Status → channel mapping
+        # Status → channel mapping.  Default: only queued→tasks (execution).
+        # Grooming is schedule-driven via ScheduleSource, not event-driven.
         self.status_channel_map: dict[str, str] = config.get("status_channel_map", {
-            "backlog": "goals",
-            "needs grooming": "goals",
             "queued": "tasks",
         })
 
         # Per-status poll intervals (seconds)
         self.poll_intervals: dict[str, float] = config.get("poll_intervals", {
-            "backlog": 1800,        # 30 min — grooming pace
-            "needs grooming": 1800,
             "queued": 120,          # 2 min — execution pace
         })
 
