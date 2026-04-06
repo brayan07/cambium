@@ -1,4 +1,0 @@
-name: consolidator
-adapter_instance: consolidator
-listen: [sessions_completed]
-publish: [reflections]

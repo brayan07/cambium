@@ -1,0 +1,6 @@
+name: sentry
+adapter_type: claude-code
+config:
+  model: haiku
+  system_prompt_path: adapters/claude-code/prompts/sentry.md
+  skills: [cambium-api]

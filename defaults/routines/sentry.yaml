@@ -1,0 +1,6 @@
+name: sentry
+adapter_instance: sentry
+listen: [heartbeat]
+publish: [thoughts]
+suppress_completion_event: true
+max_concurrency: 1

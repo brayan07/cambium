@@ -12,6 +12,8 @@ from pathlib import Path
 from typing import Any, Callable
 
 from cambium.adapters.base import AdapterInstanceRegistry, AdapterType, RunResult
+from cambium.episode.model import Episode, EpisodeStatus
+from cambium.episode.store import EpisodeStore
 from cambium.models.message import Message
 from cambium.models.routine import Routine
 from cambium.server.auth import create_session_token
@@ -33,6 +35,7 @@ class RoutineRunner:
         self.adapter_types = adapter_types
         self.instance_registry = instance_registry
         self.session_store = session_store
+        self.episode_store: EpisodeStore | None = None
         self.api_base_url = api_base_url
         self.user_dir = user_dir
 
@@ -99,6 +102,15 @@ class RoutineRunner:
             elif existing.status == SessionStatus.ACTIVE:
                 # Already active (e.g., second message in interactive session)
                 resume = True
+
+        # Create episode entry
+        if self.episode_store:
+            episode = Episode.create(
+                session_id=session_id,
+                routine=routine.name,
+                trigger_event_ids=[message.id] if message else [],
+            )
+            self.episode_store.create_episode(episode)
 
         # Issue session token
         token = create_session_token(routine.name, session_id)
@@ -170,5 +182,10 @@ class RoutineRunner:
         if self.session_store:
             status = SessionStatus.COMPLETED if result.success else SessionStatus.FAILED
             self.session_store.update_status(session_id, status)
+
+        # Complete episode entry
+        if self.episode_store:
+            ep_status = EpisodeStatus.COMPLETED if result.success else EpisodeStatus.FAILED
+            self.episode_store.complete_episode(session_id, ep_status)
 
         return result

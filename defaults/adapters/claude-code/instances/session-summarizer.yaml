@@ -1,0 +1,6 @@
+name: session-summarizer
+adapter_type: claude-code
+config:
+  model: haiku
+  system_prompt_path: adapters/claude-code/prompts/session-summarizer.md
+  skills: [cambium-api]

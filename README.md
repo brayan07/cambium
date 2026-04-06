@@ -36,20 +36,28 @@ See [docs/architecture.md](docs/architecture.md) for the full system architectur
 src/cambium/
 ├── adapters/          # Runtime execution (Claude Code)
 ├── cli/               # CLI commands (init)
-├── consumer/          # Message polling and dispatch
+├── consumer/          # Message polling and dispatch (concurrency + batching)
+├── episode/           # Episodic memory index (episodes + channel events)
 ├── mcp/               # MCP server registry and passthrough
+├── memory/            # Long-term memory service (git-backed markdown init)
 ├── models/            # Core data models (Message, Routine, Skill)
+├── preference/        # Preference learning and calibration
 ├── queue/             # Persistent message queue (SQLite)
-├── runner/            # Orchestrator (session + auth + execution)
-├── server/            # FastAPI app, auth, session endpoints
-└── session/           # Session lifecycle, transcript storage, SSE
+├── runner/            # Orchestrator (session + auth + execution + episode logging)
+├── server/            # FastAPI app, auth, session/episode/work-item endpoints
+├── session/           # Session lifecycle, transcript storage, SSE
+├── timer/             # Cron-scheduled heartbeat system
+└── work_item/         # Planning and execution backbone
 
 defaults/              # Seed config for cambium init
-├── routines/          # 6 default routines
-└── adapters/          # Adapter instances, prompts, skills
+├── routines/          # 8 default routines
+├── adapters/          # Adapter instances, prompts, skills
+├── memory/            # Seed content for long-term memory directory
+└── timers.yaml        # Cron schedule for heartbeat timers
 
-tests/                 # Test suite
+tests/                 # Test suite (278 tests)
 docs/                  # Architecture and design docs
+scripts/               # Demo and utility scripts
 ```
 
 ## Configuration
