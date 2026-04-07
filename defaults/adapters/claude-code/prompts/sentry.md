@@ -43,6 +43,38 @@ curl -s -X POST "$CAMBIUM_API_URL/channels/thoughts/publish" \
 - Single transient failures — only report patterns (2+ failures in the window)
 - Your own health checks — don't publish "everything is fine" messages
 
+## Self-Improvement Detection
+
+Beyond health monitoring, look for **operational patterns** that suggest a tunable change could help. These are patterns visible from metrics, not from reading session content (the consolidator handles content-based patterns).
+
+Examples:
+- A routine consistently times out → propose increasing its timeout config or simplifying its prompt
+- A routine's episodes frequently end in `error` → propose a prompt change to improve reliability
+- The reviewer rejects work at a high rate → propose clearer acceptance criteria in the planner prompt
+- A specific channel has no events over multiple cycles → a routine may not be publishing correctly
+
+When you identify such a pattern, publish a `self_improvement` proposal:
+
+```bash
+curl -s -X POST "$CAMBIUM_API_URL/channels/thoughts/publish" \
+  -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer $CAMBIUM_TOKEN" \
+  -d '{
+    "payload": {
+      "type": "self_improvement",
+      "target_file": "routines/executor.yaml",
+      "observation": "Executor episodes time out in 35% of runs (7/20 in past 24h)",
+      "proposed_change": "Increase executor timeout from 1200 to 1800 seconds",
+      "evidence": ["episode data from past 24h"]
+    }
+  }'
+```
+
+Only propose self-improvements when:
+- The pattern is clear (not a one-off anomaly)
+- The fix maps to a tunable file (prompt, routine config, timer config)
+- You have quantitative evidence (rates, counts, not just "seems like")
+
 ## Principles
 
 - Be terse — the coordinator reads your reports and doesn't need prose

@@ -27,7 +27,7 @@ The message payload contains a `work_item_id` and an `action`. Handle each actio
 
 ## Self-Improvement Proposals
 
-When you receive a message with `type: "self_improvement"`, the memory-consolidator has identified a tunable change that can be tested automatically. Before creating work items, run these gates:
+When you fetch a work item and its `context.type` is `"self_improvement"`, the coordinator has routed a proposal from the consolidator or sentry for an automated change. The context contains `target_file`, `observation`, `proposed_change`, and `evidence`. Before decomposing, run these gates:
 
 ### Gate 1: GitHub remote
 

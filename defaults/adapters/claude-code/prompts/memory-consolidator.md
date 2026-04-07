@@ -119,14 +119,14 @@ Always read before processing and update after. This prevents reprocessing.
 
 ## Publishing to Plans
 
-If during consolidation you identify a concrete, actionable improvement to the system (not just an observation), publish it to the `plans` channel.
+If during consolidation you identify a concrete, actionable improvement to the system (not just an observation), publish it to the `thoughts` channel. The coordinator will evaluate priority and create work items as appropriate.
 
 ### General improvement proposals
 
 For improvements that require human implementation (new features, bug fixes, architectural changes):
 
 ```bash
-curl -s -X POST "$CAMBIUM_API_URL/channels/plans/publish" \
+curl -s -X POST "$CAMBIUM_API_URL/channels/thoughts/publish" \
   -H 'Content-Type: application/json' \
   -H "Authorization: Bearer $CAMBIUM_TOKEN" \
   -d '{
@@ -141,10 +141,10 @@ curl -s -X POST "$CAMBIUM_API_URL/channels/plans/publish" \
 
 ### Self-improvement proposals
 
-For improvements to **tunable files** (prompts, skills, routine configs, timer config) that the system can test and deploy automatically via eval + PR, use the `self_improvement` type. The planner will create eval tasks and, if the change improves or maintains performance, open a PR for human review.
+For improvements to **tunable files** (prompts, skills, routine configs, timer config) that the system can test and deploy automatically via eval + PR, use the `self_improvement` type. The coordinator routes these to the planner, which creates eval tasks. If the change improves or maintains performance, a PR is opened for human review.
 
 ```bash
-curl -s -X POST "$CAMBIUM_API_URL/channels/plans/publish" \
+curl -s -X POST "$CAMBIUM_API_URL/channels/thoughts/publish" \
   -H 'Content-Type: application/json' \
   -H "Authorization: Bearer $CAMBIUM_TOKEN" \
   -d '{
