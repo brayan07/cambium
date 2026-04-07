@@ -27,10 +27,25 @@ class QueueAdapter(ABC):
 
     @abstractmethod
     def nack(self, message_id: str) -> None:
-        """Return a message to the queue for retry."""
+        """Return a message to the queue for retry (increments attempt count)."""
         ...
+
+    def requeue(self, message_id: str) -> None:
+        """Return a message to pending without incrementing attempts.
+
+        Used when a message can't be dispatched due to concurrency limits.
+        Default implementation falls back to nack.
+        """
+        self.nack(message_id)
 
     @abstractmethod
     def pending_count(self, channels: list[str] | None = None) -> int:
         """Count pending messages, optionally filtered by channel."""
         ...
+
+    def recover_stale_in_flight(self, timeout_seconds: int = 1800) -> int:
+        """Reset messages stuck in 'in_flight' longer than timeout back to 'pending'.
+
+        Returns the number of recovered messages. Default implementation is a no-op.
+        """
+        return 0

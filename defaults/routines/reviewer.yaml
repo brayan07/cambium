@@ -1,4 +1,5 @@
 name: reviewer
 adapter_instance: reviewer
 listen: [completions]
-publish: [evaluations]
+publish: [reviews]
+max_concurrency: 2

@@ -29,12 +29,13 @@ These are the channels in the system. Your routine can only publish to a subset 
 
 | Channel | Purpose |
 |---------|---------|
-| `events` | External triggers (ClickUp, cron, user actions) |
+| `external_events` | External triggers (ClickUp, cron, user actions) |
 | `plans` | Projects/goals that need decomposition into tasks |
 | `tasks` | Concrete tasks ready for execution |
 | `completions` | Completed work awaiting review |
-| `evaluations` | Review verdicts (accepted / rejected / changes_requested) |
-| `reflections` | Observations from the consolidator about patterns and improvements |
+| `reviews` | Review verdicts (accepted / rejected / changes_requested) |
+| `thoughts` | Observations about patterns and improvements |
+| `heartbeat` | Timer-driven wake-up signals for sentry and consolidator |
 | `sessions_completed` | Session lifecycle events (system-emitted) |
 | `input_needed` | Requests for user input (auto-persisted to central store) |
 
@@ -90,10 +91,10 @@ curl -s -X POST "$CAMBIUM_API_URL/channels/completions/publish" \
   }'
 ```
 
-### Reviewer publishing an evaluation
+### Reviewer publishing a review
 
 ```bash
-curl -s -X POST "$CAMBIUM_API_URL/channels/evaluations/publish" \
+curl -s -X POST "$CAMBIUM_API_URL/channels/reviews/publish" \
   -H 'Content-Type: application/json' \
   -H "Authorization: Bearer $CAMBIUM_TOKEN" \
   -d '{
@@ -253,6 +254,92 @@ pending → ready → active → completed
                         → blocked → ready
 pending/ready/blocked/failed → canceled
 ```
+
+## Episodic Index
+
+The episodic index tracks routine invocations (episodes) and channel messages (events) as a queryable timeline.
+
+### Querying episodes
+
+```bash
+# List recent episodes (since/until required, ISO format)
+curl -s "$CAMBIUM_API_URL/episodes?since=2026-04-06T00:00:00Z&until=2026-04-07T00:00:00Z"
+
+# Filter by routine
+curl -s "$CAMBIUM_API_URL/episodes?since=2026-04-06T00:00:00Z&until=2026-04-07T00:00:00Z&routine=coordinator"
+
+# Get a specific episode
+curl -s "$CAMBIUM_API_URL/episodes/EPISODE_ID"
+```
+
+Episode fields: `id`, `session_id`, `routine`, `started_at`, `ended_at`, `status` (running/completed/failed), `trigger_event_ids`, `emitted_event_ids`, `session_acknowledged`, `session_summary`, `summarizer_acknowledged`, `digest_path`.
+
+### Posting a session summary
+
+After completing your work, you can post a 2-3 sentence summary of what you did:
+
+```bash
+curl -s -X POST "$CAMBIUM_API_URL/episodes/summary" \
+  -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer $CAMBIUM_TOKEN" \
+  -d '{"summary": "Analyzed 3 completed sessions. Identified recurring pattern of failed API calls. Published improvement proposal to thoughts channel."}'
+```
+
+This uses your JWT to identify the session and marks the episode as self-acknowledged.
+
+### Querying channel events
+
+```bash
+# List events in a time range
+curl -s "$CAMBIUM_API_URL/events?since=2026-04-06T00:00:00Z&until=2026-04-07T00:00:00Z"
+
+# Filter by channel
+curl -s "$CAMBIUM_API_URL/events?since=2026-04-06T00:00:00Z&until=2026-04-07T00:00:00Z&channel=thoughts"
+
+# Get a specific event
+curl -s "$CAMBIUM_API_URL/events/EVENT_ID"
+```
+
+## Long-term Memory
+
+The system maintains a long-term memory directory as a git-backed markdown repository. Routines read and write files directly via the filesystem.
+
+### Structure
+
+```
+~/.cambium/memory/
+  _index.md                        # Master MOC (map of content)
+  sessions/YYYY-MM-DD/             # Session digests
+  digests/{daily,weekly,monthly}/  # Periodic rollups
+  knowledge/                       # System's beliefs (wiki)
+  library/                         # Digested external content
+  .consolidator-state.md           # Processing checkpoints
+```
+
+### Knowledge entries
+
+Knowledge files represent the system's beliefs. Every entry must include frontmatter:
+
+```yaml
+---
+title: Topic description
+confidence: 0.85
+last_confirmed: 2026-04-06
+---
+Content of the belief.
+
+**Evidence:**
+- Observed in sessions/2026-03-15/sess-abc.md through sessions/2026-04-01/sess-xyz.md
+- Confirmed by user (sessions/2026-03-18/sess-def.md)
+```
+
+### Library entries
+
+Library files are digested external content (books, papers, etc.). They are reference material, not endorsed as truth. Do not internalize library content as knowledge without independent verification.
+
+### Session digests
+
+Session digests are written by the session-summarizer routine to `sessions/YYYY-MM-DD/{short-session-id}.md`. Each digest captures what happened, what was decided, and what was learned.
 
 ## Important
 

@@ -2,3 +2,4 @@ name: planner
 adapter_instance: planner
 listen: [plans]
 publish: [tasks, input_needed]
+max_concurrency: 2

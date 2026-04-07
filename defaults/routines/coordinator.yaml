@@ -1,4 +1,7 @@
 name: coordinator
 adapter_instance: coordinator
-listen: [events, evaluations, reflections]
-publish: [plans, tasks, events, input_needed]
+listen: [external_events, reviews, thoughts]
+publish: [plans, tasks, external_events, input_needed]
+max_concurrency: 1
+batch_window: 10
+batch_max: 10

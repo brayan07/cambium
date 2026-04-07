@@ -12,9 +12,12 @@ import uvicorn
 from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field
 
+from cambium.memory.service import MemoryService
 from cambium.adapters.base import AdapterInstanceRegistry
 from cambium.adapters.claude_code import ClaudeCodeAdapter
 from cambium.consumer.loop import ConsumerLoop
+from cambium.episode.model import ChannelEvent
+from cambium.episode.store import EpisodeStore
 from cambium.mcp.file_registry import FileRegistry
 from cambium.models.message import Message
 from cambium.models.routine import RoutineRegistry
@@ -22,10 +25,13 @@ from cambium.models.skill import SkillRegistry
 from cambium.queue.sqlite import SQLiteQueue
 from cambium.runner.routine_runner import RoutineRunner
 from cambium.server.auth import authenticate, verify_session_token
+from cambium.server import episodes as episodes_module
 from cambium.server import sessions as sessions_module
 from cambium.server import work_items as work_items_module
 from cambium.session.broadcaster import BroadcasterRegistry
 from cambium.session.store import SessionStore
+from cambium.timer.loop import TimerLoop
+from cambium.timer.model import load_timers
 from cambium.work_item.service import WorkItemService
 from cambium.work_item.store import WorkItemStore
 
@@ -72,26 +78,34 @@ class CambiumServer:
         routine_registry: RoutineRegistry,
         routine_runner: RoutineRunner,
         consumer: ConsumerLoop,
+        timer_loop: TimerLoop | None = None,
     ) -> None:
         self.queue = queue
         self.routine_registry = routine_registry
         self.routine_runner = routine_runner
         self.consumer = consumer
+        self.timer_loop = timer_loop
         self._consumer_task: asyncio.Task | None = None
+        self._timer_task: asyncio.Task | None = None
 
     async def start_consumer(self) -> None:
         self._consumer_task = asyncio.create_task(self._run_consumer())
         log.info("Consumer loop started")
+        if self.timer_loop and self.timer_loop.timers:
+            self._timer_task = asyncio.create_task(self._run_timers())
+            log.info(f"Timer loop started ({len(self.timer_loop.timers)} timers)")
 
     async def stop_consumer(self) -> None:
-        if self._consumer_task:
-            self._consumer_task.cancel()
-            try:
-                await self._consumer_task
-            except asyncio.CancelledError:
-                pass
-            self._consumer_task = None
-            log.info("Consumer loop stopped")
+        for task, name in [(self._timer_task, "Timer"), (self._consumer_task, "Consumer")]:
+            if task:
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+                log.info(f"{name} loop stopped")
+        self._consumer_task = None
+        self._timer_task = None
 
     @property
     def consumer_running(self) -> bool:
@@ -109,10 +123,22 @@ class CambiumServer:
                 log.exception("Consumer tick error")
             await asyncio.sleep(self.consumer.poll_interval)
 
+    async def _run_timers(self) -> None:
+        loop = asyncio.get_event_loop()
+        while True:
+            try:
+                fired = await loop.run_in_executor(None, self.timer_loop.tick)
+                if fired:
+                    log.info(f"Timers fired: {fired}")
+            except Exception:
+                log.exception("Timer tick error")
+            await asyncio.sleep(60)  # Cron resolution is 1 minute
+
 
 # --- Module-level state ---
 
 _server: CambiumServer | None = None
+_episode_store: EpisodeStore | None = None
 
 
 def _get_routine_permissions(routine_name: str) -> tuple[list[str], list[str]]:
@@ -172,6 +198,9 @@ def build_server(
     # Session store (shares DB with queue)
     session_store = SessionStore(db_path)
 
+    # Episode store (shares DB with queue + sessions)
+    episode_store = EpisodeStore(db_path)
+
     # Broadcaster registry for live streaming
     broadcaster_registry = BroadcasterRegistry()
 
@@ -183,6 +212,7 @@ def build_server(
         api_base_url=api_base_url,
         user_dir=user_dir,
     )
+    routine_runner.episode_store = episode_store
 
     # Work item store + service (separate DB)
     if db_path == ":memory:":
@@ -191,6 +221,9 @@ def build_server(
         wi_db_path = str(Path(db_path).parent / "work_items.db")
     work_item_store = WorkItemStore(wi_db_path)
     work_item_service = WorkItemService(store=work_item_store, queue=queue)
+
+    # Configure episode endpoints
+    episodes_module.configure(episode_store=episode_store)
 
     # Configure work item endpoints
     work_items_module.configure(service=work_item_service)
@@ -213,9 +246,23 @@ def build_server(
         live=live,
     )
 
+    # Set module-level episode store for publish endpoint event recording
+    global _episode_store
+    _episode_store = episode_store
+
+    # Memory service — ensure the long-term memory directory exists
+    memory_dir = user_dir / "memory"
+    memory_service = MemoryService(memory_dir)
+    log.info(f"Memory directory: {memory_service.path}")
+
+    # Timer loop
+    timers = load_timers(user_dir / "timers.yaml")
+    timer_loop = TimerLoop(timers, queue) if timers else None
+
     log.info(f"Skills: {skill_registry.names()}")
     log.info(f"Adapter instances: {[i.name for i in instance_registry.all()]}")
     log.info(f"Routines: {[r.name for r in routine_registry.all()]}")
+    log.info(f"Timers: {[t.name for t in timers]}")
     log.info(f"Queue DB: {db_path}")
     log.info(f"Live mode: {live}")
 
@@ -224,6 +271,7 @@ def build_server(
         routine_registry=routine_registry,
         routine_runner=routine_runner,
         consumer=consumer,
+        timer_loop=timer_loop,
     )
 
 
@@ -246,6 +294,7 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+app.include_router(episodes_module.router)
 app.include_router(sessions_module.router)
 app.include_router(work_items_module.router)
 
@@ -286,6 +335,18 @@ def publish_to_channel(
     server.queue.publish(message)
     log.info(f"Published to '{channel}' by '{routine_name}' (id={message.id[:8]})")
 
+    # Record channel event in episodic index
+    if _episode_store:
+        session_id = claims.get("session")
+        event = ChannelEvent.create(
+            channel=channel,
+            payload=body.payload,
+            source_session_id=session_id,
+        )
+        _episode_store.record_event(event)
+        if session_id:
+            _episode_store.append_emitted_event(session_id, event.id)
+
     return PublishResponse(id=message.id, channel=channel, status="pending")
 
 
@@ -308,6 +369,12 @@ def send_to_channel(channel: str, body: PublishRequest):
     message = Message.create(channel=channel, payload=body.payload, source="external")
     server.queue.publish(message)
     log.info(f"External send to '{channel}' (id={message.id[:8]})")
+
+    # Record channel event in episodic index (no session association)
+    if _episode_store:
+        event = ChannelEvent.create(channel=channel, payload=body.payload)
+        _episode_store.record_event(event)
+
     return PublishResponse(id=message.id, channel=channel, status="pending")
 
 

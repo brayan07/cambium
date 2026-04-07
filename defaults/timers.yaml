@@ -1,0 +1,20 @@
+timers:
+  - name: sentry-5min
+    channel: heartbeat
+    schedule: "*/5 * * * *"
+    payload: { window: micro, target: sentry }
+
+  - name: consolidator-hourly
+    channel: heartbeat
+    schedule: "0 * * * *"
+    payload: { window: hourly, target: memory-consolidator }
+
+  - name: consolidator-daily
+    channel: heartbeat
+    schedule: "0 6 * * *"
+    payload: { window: daily, target: memory-consolidator }
+
+  - name: consolidator-weekly
+    channel: heartbeat
+    schedule: "0 6 * * 1"
+    payload: { window: weekly, target: memory-consolidator }

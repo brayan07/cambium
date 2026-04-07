@@ -20,6 +20,10 @@ class Routine:
     adapter_instance: str
     listen: list[str] = field(default_factory=list)
     publish: list[str] = field(default_factory=list)
+    suppress_completion_event: bool = False
+    max_concurrency: int = 0  # 0 = unbounded
+    batch_window: float = 0.0  # seconds; 0 = no batching
+    batch_max: int = 1  # max messages per batch; 1 = no batching
 
     @classmethod
     def from_file(cls, path: Path) -> Routine:
@@ -29,6 +33,10 @@ class Routine:
             adapter_instance=data.get("adapter_instance", ""),
             listen=data.get("listen", []),
             publish=data.get("publish", []),
+            suppress_completion_event=data.get("suppress_completion_event", False),
+            max_concurrency=data.get("max_concurrency", 0),
+            batch_window=float(data.get("batch_window", 0)),
+            batch_max=int(data.get("batch_max", 1)),
         )
 
 

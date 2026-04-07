@@ -1,4 +1,4 @@
 name: interlocutor
 adapter_instance: interlocutor
 listen: []
-publish: [plans, tasks, events, input_needed]
+publish: [plans, tasks, external_events, input_needed]
