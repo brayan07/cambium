@@ -148,24 +148,37 @@ class EvalRunner:
         log.warning(f"Timed out waiting for routine '{routine}' to complete")
 
     def _wait_cascade_settled(self, ctx: StagingContext, deadline: float) -> None:
-        """Poll until no pending messages and no running episodes."""
+        """Poll until no pending messages, no in-flight, and no running episodes.
+
+        The consumer moves messages from 'pending' to 'in_flight' on consume,
+        so we must check both to avoid declaring settled during inter-routine
+        hand-offs (e.g., executor publishes to 'completions' but reviewer
+        hasn't started yet).
+        """
         # Give the system a moment to start processing
-        time.sleep(3)
+        time.sleep(5)
 
         settled_count = 0
+        prev_episode_count = 0
         while time.monotonic() < deadline:
             health = ctx.health()
             pending = health.get("pending_messages", 0)
+            in_flight = health.get("in_flight_messages", 0)
             episodes = ctx.episodes()
             running = [ep for ep in episodes if ep.get("status") == "running"]
+            total_episodes = len(episodes)
 
-            if pending == 0 and not running:
+            is_quiet = pending == 0 and in_flight == 0 and not running
+
+            if is_quiet and total_episodes == prev_episode_count:
                 settled_count += 1
-                # Require 3 consecutive settled checks to avoid false positives
-                if settled_count >= 3:
+                # Require 5 consecutive quiet checks (15s) to avoid false
+                # positives during inter-routine hand-offs.
+                if settled_count >= 5:
                     return
             else:
                 settled_count = 0
 
-            time.sleep(2)
+            prev_episode_count = total_episodes
+            time.sleep(3)
         log.warning("Timed out waiting for cascade to settle")

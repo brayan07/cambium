@@ -66,6 +66,7 @@ class HealthResponse(BaseModel):
     status: str
     consumer_running: bool
     pending_messages: int
+    in_flight_messages: int = 0
 
 
 # --- Server state ---
@@ -426,6 +427,7 @@ def health():
         status="ok",
         consumer_running=server.consumer_running,
         pending_messages=server.queue.pending_count(),
+        in_flight_messages=server.queue.in_flight_count(),
     )
 
 

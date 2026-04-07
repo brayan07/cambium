@@ -1,6 +1,6 @@
 name: canary-cascade
 trials: 1
-timeout: 300
+timeout: 600
 
 # Override ALL adapter instances to sonnet — tests structure, not quality.
 # Haiku is too weak for multi-tool orchestration (fails to execute curl calls).

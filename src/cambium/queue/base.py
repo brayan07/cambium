@@ -43,6 +43,10 @@ class QueueAdapter(ABC):
         """Count pending messages, optionally filtered by channel."""
         ...
 
+    def in_flight_count(self) -> int:
+        """Count messages currently being processed (consumed but not yet acked)."""
+        return 0
+
     def recover_stale_in_flight(self, timeout_seconds: int = 1800) -> int:
         """Reset messages stuck in 'in_flight' longer than timeout back to 'pending'.
 
