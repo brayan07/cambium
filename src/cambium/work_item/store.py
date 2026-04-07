@@ -625,7 +625,7 @@ class WorkItemStore:
         self,
         item_id: str | None = None,
         event_type: str | None = None,
-        after: int | None = None,
+        after: str | None = None,
         limit: int = 100,
     ) -> list[WorkItemEvent]:
         query = f"SELECT {self._EVENT_COLS} FROM work_item_events"
@@ -638,7 +638,7 @@ class WorkItemStore:
             conditions.append("event_type = ?")
             params.append(event_type)
         if after is not None:
-            conditions.append("seq > ?")
+            conditions.append("created_at > ?")
             params.append(after)
         if conditions:
             query += " WHERE " + " AND ".join(conditions)
