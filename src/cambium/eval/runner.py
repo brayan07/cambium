@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from cambium.eval.assertions import check_assertion
+from cambium.eval.manifest import load_manifest
 from cambium.eval.model import (
     EvalConfig,
     EvalResult,
@@ -24,9 +25,12 @@ log = logging.getLogger(__name__)
 class EvalRunner:
     """Runs eval scenarios against staging Cambium instances."""
 
-    def __init__(self, repo_dir: Path, live: bool = True) -> None:
+    def __init__(
+        self, repo_dir: Path, live: bool = True, enforce_manifest: bool = True,
+    ) -> None:
         self.repo_dir = repo_dir
         self.live = live
+        self.enforce_manifest = enforce_manifest
 
     def run(
         self,
@@ -38,6 +42,18 @@ class EvalRunner:
         effective_override = config.config_override
         if extra_override:
             effective_override = merge_config_overrides(effective_override, extra_override)
+
+        # Validate overrides against tunable manifest
+        if self.enforce_manifest and effective_override:
+            from cambium.server.app import _resolve_config_dir
+            config_dir = _resolve_config_dir(self.repo_dir)
+            manifest = load_manifest(config_dir)
+            violations = manifest.validate_override(effective_override)
+            if violations:
+                raise ValueError(
+                    f"Config override violates tunable manifest:\n"
+                    + "\n".join(f"  - {v}" for v in violations)
+                )
 
         scenario_results = []
         for scenario in config.scenarios:
