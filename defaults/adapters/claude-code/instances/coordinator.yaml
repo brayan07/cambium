@@ -3,4 +3,4 @@ adapter_type: claude-code
 config:
   model: opus
   system_prompt_path: adapters/claude-code/prompts/coordinator.md
-  skills: [cambium-api]
+  skills: [cambium-api, cambium-self-improvement]

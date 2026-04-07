@@ -166,67 +166,11 @@ curl -s -X POST "$CAMBIUM_API_URL/channels/thoughts/publish" \
 
 ### Self-improvement proposals
 
-For improvements to **tunable files** (prompts, skills, routine configs, timer config) that the system can test and deploy automatically via eval + PR, use the `self_improvement` type. The coordinator routes these to the planner, which creates eval tasks. If the change improves or maintains performance, a PR is opened for human review.
-
-```bash
-curl -s -X POST "$CAMBIUM_API_URL/channels/thoughts/publish" \
-  -H 'Content-Type: application/json' \
-  -H "Authorization: Bearer $CAMBIUM_TOKEN" \
-  -d '{
-    "payload": {
-      "type": "self_improvement",
-      "target_file": "adapters/claude-code/prompts/coordinator.md",
-      "observation": "Coordinator creates vague work items without acceptance criteria in 60% of sessions",
-      "proposed_change": "Add requirement for concrete deliverable and acceptance criteria in every work item",
-      "evidence": ["sessions/2026-04-06/f8dc141b.md", "sessions/2026-04-07/abc123.md"]
-    }
-  }'
-```
-
-**Required fields for `self_improvement`:**
-- `target_file`: Path relative to the config directory (must be a tunable file per `tunable-manifest.yaml`)
-- `observation`: What pattern you observed (specific, quantified if possible)
-- `proposed_change`: What to change and why it should help
-- `evidence`: List of session digest paths that support the observation
-
-**When to propose self-improvement vs. general improvement:**
-- Self-improvement: the fix is a change to a prompt, skill, or config parameter
-- General improvement: the fix requires code changes, new features, or architectural work
-
-Only publish improvements that are:
-- Grounded in evidence (not theoretical)
-- Actionable (someone could implement it)
-- Non-trivial (worth the coordinator's attention)
-- Supported by at least 2 independent observations (for self-improvement proposals)
+For improvements to **tunable files** (prompts, skills, routine configs, timer config) that the system can test and deploy automatically, read `references/detection.md` in the `cambium-self-improvement` skill — specifically the **Content-based pattern detection** and **Structured proposal format** sections.
 
 ### Upstream contribution detection
 
-During weekly consolidation, if `self_improvement.contribute_upstream` is `true` in `defaults/config.yaml`, check for merged self-improvement PRs with the `contribute-upstream` label that haven't been contributed yet:
-
-```bash
-gh pr list --state all --search "label:self-improvement label:contribute-upstream is:merged" --json number,title,mergeCommit --limit 10
-```
-
-For each, check if an upstream PR already exists:
-```bash
-gh pr list --repo <upstream-repo> --state all --search "user-improvement-<PR_NUMBER>" --json number
-```
-
-If not already contributed, publish to `thoughts`:
-
-```bash
-curl -s -X POST "$CAMBIUM_API_URL/channels/thoughts/publish" \
-  -H 'Content-Type: application/json' \
-  -H "Authorization: Bearer $CAMBIUM_TOKEN" \
-  -d '{
-    "payload": {
-      "type": "upstream_contribution",
-      "source_pr": <number>,
-      "merge_commit": "<sha>",
-      "upstream_role": "<from config>"
-    }
-  }'
-```
+During weekly consolidation, check for merged self-improvement PRs tagged for upstream contribution. Read the **Upstream contribution detection** section in `references/detection.md` of the `cambium-self-improvement` skill.
 
 ## Principles
 
