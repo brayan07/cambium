@@ -26,7 +26,7 @@ config_override:
       model: sonnet
   adapters/claude-code/instances/session-summarizer.yaml:
     config:
-      model: sonnet
+      model: haiku
 
 scenarios:
   - name: full-system-activation
