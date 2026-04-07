@@ -1,0 +1,22 @@
+# Tunable manifest — defines what the self-improvement loop can modify.
+#
+# "tunable" entries are files the system may propose changes to via PR.
+# "protected" entries require human authorship and are never auto-modified.
+# Paths are relative to the config directory (defaults/).
+
+tunable:
+  - path: "adapters/claude-code/prompts/*.md"
+    type: prompt
+  - path: "adapters/claude-code/skills/*/SKILL.md"
+    type: skill
+  - path: "routines/*.yaml"
+    type: routine_config
+    fields: [max_concurrency, batch_window, batch_max]
+  - path: "timers.yaml"
+    type: timer_config
+
+protected:
+  - path: "constitution.md"
+  - path: "config.yaml"
+  - path: "mcp-servers.json"
+  - path: "tunable-manifest.yaml"

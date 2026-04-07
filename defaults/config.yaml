@@ -1,0 +1,14 @@
+# Cambium configuration
+queue:
+  adapter: sqlite
+  database: data/cambium.db
+
+self_improvement:
+  # How to handle upstream framework updates:
+  #   manual  — no automatic upstream interaction (default)
+  #   notify  — flag when upstream has new commits
+  #   auto    — generate tailored merge PRs for upstream changes
+  upstream_policy: manual
+
+  # Hard cap on open self-improvement PRs (prevents PR flooding)
+  max_pending_improvement_prs: 3
