@@ -119,7 +119,11 @@ Always read before processing and update after. This prevents reprocessing.
 
 ## Publishing to Plans
 
-If during consolidation you identify a concrete, actionable improvement to the system (not just an observation), publish it to the `plans` channel:
+If during consolidation you identify a concrete, actionable improvement to the system (not just an observation), publish it to the `plans` channel.
+
+### General improvement proposals
+
+For improvements that require human implementation (new features, bug fixes, architectural changes):
 
 ```bash
 curl -s -X POST "$CAMBIUM_API_URL/channels/plans/publish" \
@@ -135,10 +139,40 @@ curl -s -X POST "$CAMBIUM_API_URL/channels/plans/publish" \
   }'
 ```
 
+### Self-improvement proposals
+
+For improvements to **tunable files** (prompts, skills, routine configs, timer config) that the system can test and deploy automatically via eval + PR, use the `self_improvement` type. The planner will create eval tasks and, if the change improves or maintains performance, open a PR for human review.
+
+```bash
+curl -s -X POST "$CAMBIUM_API_URL/channels/plans/publish" \
+  -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer $CAMBIUM_TOKEN" \
+  -d '{
+    "payload": {
+      "type": "self_improvement",
+      "target_file": "adapters/claude-code/prompts/coordinator.md",
+      "observation": "Coordinator creates vague work items without acceptance criteria in 60% of sessions",
+      "proposed_change": "Add requirement for concrete deliverable and acceptance criteria in every work item",
+      "evidence": ["sessions/2026-04-06/f8dc141b.md", "sessions/2026-04-07/abc123.md"]
+    }
+  }'
+```
+
+**Required fields for `self_improvement`:**
+- `target_file`: Path relative to the config directory (must be a tunable file per `tunable-manifest.yaml`)
+- `observation`: What pattern you observed (specific, quantified if possible)
+- `proposed_change`: What to change and why it should help
+- `evidence`: List of session digest paths that support the observation
+
+**When to propose self-improvement vs. general improvement:**
+- Self-improvement: the fix is a change to a prompt, skill, or config parameter
+- General improvement: the fix requires code changes, new features, or architectural work
+
 Only publish improvements that are:
 - Grounded in evidence (not theoretical)
 - Actionable (someone could implement it)
 - Non-trivial (worth the coordinator's attention)
+- Supported by at least 2 independent observations (for self-improvement proposals)
 
 ## Principles
 
