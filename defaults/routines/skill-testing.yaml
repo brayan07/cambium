@@ -1,0 +1,5 @@
+name: skill-testing
+adapter_instance: skill-testing
+listen: [skill_created, skill_updated, skill_deploy_requested]
+publish: [skill_test_passed, skill_test_failed]
+max_concurrency: 1
