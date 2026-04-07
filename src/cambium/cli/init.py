@@ -269,7 +269,19 @@ def _setup_github(root: Path, repo_name: str) -> None:
             cwd=root, capture_output=True, check=False,
         )
 
-    # Rewrite to SSH if user prefers it
+    # Push initial commit BEFORE rewriting to SSH (HTTPS is immediately
+    # available; SSH may lag after repo creation).
+    push_result = subprocess.run(
+        ["git", "push", "-u", "origin", "main"],
+        cwd=root, capture_output=True, text=True,
+    )
+    if push_result.returncode != 0:
+        log.warning(
+            f"GitHub repo created but initial push failed: "
+            f"{push_result.stderr.strip() or f'exit code {push_result.returncode}'}"
+        )
+
+    # Rewrite origin to SSH if user prefers it (after push)
     proto_result = subprocess.run(
         ["gh", "auth", "status"], capture_output=True, text=True,
     )
@@ -285,17 +297,6 @@ def _setup_github(root: Path, repo_name: str) -> None:
                  f"git@github.com:{gh_user}/{repo_name}.git"],
                 cwd=root, capture_output=True,
             )
-
-    # Push initial commit (best-effort)
-    push_result = subprocess.run(
-        ["git", "push", "-u", "origin", "main"],
-        cwd=root, capture_output=True, text=True,
-    )
-    if push_result.returncode != 0:
-        log.warning(
-            f"GitHub repo created but initial push failed: "
-            f"{push_result.stderr.strip() or f'exit code {push_result.returncode}'}"
-        )
 
 
 def _write_if_missing(path: Path, content: str) -> None:
