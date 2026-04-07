@@ -378,7 +378,7 @@ def get_tree(item_id: str):
 def list_work_items(
     status: str | None = None,
     parent_id: str | None = None,
-    limit: int = 50,
+    limit: int = 200,
 ):
     service = _get_service()
     status_filter = WorkItemStatus(status) if status else None

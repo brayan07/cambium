@@ -247,7 +247,7 @@ class WorkItemStore:
         self,
         status: WorkItemStatus | None = None,
         parent_id: str | None = None,
-        limit: int = 50,
+        limit: int = 200,
     ) -> tuple[list[WorkItem], int]:
         """Return (items, total_count) — total is the untruncated count."""
         where = ""
