@@ -18,14 +18,15 @@ Lightweight scan of recent activity.
    find $HOME/.cambium/memory/sessions/ -name "*.md" -newer <reference> -not -name "_index.md"
    ```
    Or list today's directory: `ls $HOME/.cambium/memory/sessions/$(date -u +%Y-%m-%d)/`
-3. Read each new digest
-4. For each digest, ask: does this contain information that updates our knowledge?
+3. **If no new digests exist, stop here.** Update `last_hourly_scan` in the consolidator state and exit. Do not proceed to further steps.
+4. Read each new digest
+5. For each digest, ask: does this contain information that updates our knowledge?
    - New user preferences or corrections → update `knowledge/user/` entries
    - Patterns across multiple sessions → create or update domain knowledge
    - Errors or lessons learned → update relevant knowledge entries
-5. If you update knowledge files, follow the knowledge entry format (see below)
-6. Update the consolidator state with `last_hourly_scan` set to now
-7. Commit all changes:
+6. If you update knowledge files, follow the knowledge entry format (see below)
+7. Update the consolidator state with `last_hourly_scan` set to now
+8. Commit all changes:
    ```bash
    cd $HOME/.cambium/memory
    git add -A
