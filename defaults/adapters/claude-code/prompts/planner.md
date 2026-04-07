@@ -25,6 +25,10 @@ The message payload contains a `work_item_id` and an `action`. Handle each actio
 2. Synthesize a combined result
 3. Complete the parent: `POST /work-items/{id}/complete` with the synthesized result
 
+## Self-Improvement, Upstream Merge, and Upstream Contribution Proposals
+
+When a work item has `context.type` of `"self_improvement"`, `"upstream_merge"`, or `"upstream_contribution"`, read `references/planning.md` in the `cambium-self-improvement` skill. It covers gate checks (GitHub remote, PR budget, tunable manifest) and the exact decomposition format for each type.
+
 ## Planning Principles
 - Tasks must be atomic — completable in one session
 - Each task child needs a clear title and description with acceptance criteria

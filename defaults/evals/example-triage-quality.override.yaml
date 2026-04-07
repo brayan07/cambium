@@ -1,0 +1,9 @@
+# Example config override — adds acceptance criteria requirement to coordinator prompt
+adapters/claude-code/prompts/coordinator.md:
+  append: |
+
+    ## Work Item Quality Requirements
+    Every work item MUST include:
+    - Concrete deliverable description
+    - Acceptance criteria (how to verify completion)
+    - Scope boundary (what is NOT included)

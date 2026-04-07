@@ -43,6 +43,10 @@ curl -s -X POST "$CAMBIUM_API_URL/channels/thoughts/publish" \
 - Single transient failures — only report patterns (2+ failures in the window)
 - Your own health checks — don't publish "everything is fine" messages
 
+## Self-Improvement Detection
+
+Beyond health monitoring, look for operational patterns that suggest a tunable change could help. Read `references/detection.md` in the `cambium-self-improvement` skill — specifically the **Operational pattern detection** and **Upstream update detection** sections.
+
 ## Principles
 
 - Be terse — the coordinator reads your reports and doesn't need prose

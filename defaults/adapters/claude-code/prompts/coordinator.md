@@ -20,10 +20,14 @@ A review verdict has come in. Your job:
 3. If accepted: no action needed (rollup handles cascading)
 
 ### thoughts
-The consolidator has identified patterns or proposed improvements. Your job:
-1. Evaluate whether the proposed improvement is actionable
-2. If so: create a work item for the improvement
-3. If not: no action needed
+The consolidator or sentry has identified patterns or proposed improvements. Your job:
+1. Evaluate whether the proposed improvement is actionable and worth pursuing now
+2. Check for duplicates: `GET /work-items?status=active` — is this already being worked on?
+3. If actionable and not a duplicate: create a work item
+
+For **self-improvement proposals**, **upstream update notifications**, and **upstream contribution proposals**, read `references/triage.md` in the `cambium-self-improvement` skill. It covers the work item format, priority, and context fields for each payload type (`self_improvement`, `upstream_update`, `upstream_contribution`).
+
+For **general improvement proposals** (payload `type: "improvement_proposal"`), create a regular work item with the proposed action as the description.
 
 ## Decision Principles
 - **Never execute work yourself** — always delegate via work items

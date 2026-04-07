@@ -13,6 +13,8 @@ def cmd_init(args: argparse.Namespace) -> None:
 
 
 def cmd_server(args: argparse.Namespace) -> None:
+    from pathlib import Path
+
     from cambium.server.app import run_server
 
     run_server(
@@ -21,6 +23,9 @@ def cmd_server(args: argparse.Namespace) -> None:
         live=args.live,
         poll_interval=args.poll_interval,
         log_level="debug" if args.verbose else "info",
+        repo_dir=Path(args.repo_dir) if args.repo_dir else None,
+        data_dir=Path(args.data_dir) if args.data_dir else None,
+        db_path=args.db_path,
     )
 
 
@@ -93,6 +98,63 @@ def cmd_chat(args: argparse.Namespace) -> None:
         sys.exit(1)
 
 
+def cmd_eval(args: argparse.Namespace) -> None:
+    import logging
+    from pathlib import Path
+
+    from cambium.eval.model import load_eval, load_config_override, merge_config_overrides
+    from cambium.eval.runner import EvalRunner
+    from cambium.eval.report import format_console, format_json, save_baseline, load_baseline
+    from cambium.eval.compare import compare, improved_or_maintained, format_comparison
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(name)s] %(message)s",
+    )
+
+    config_path = Path(args.config)
+    config = load_eval(config_path)
+
+    # Override trial count from CLI
+    if args.trials is not None:
+        config.trials = args.trials
+
+    # Load extra config override from CLI flag
+    extra_override = None
+    if args.config_override:
+        extra_override = load_config_override(Path(args.config_override))
+
+    # Determine repo dir — default to the eval config's parent's parent
+    # (assumes evals/ lives in the repo root or defaults/)
+    repo_dir = Path(args.repo_dir) if args.repo_dir else Path.cwd()
+
+    runner = EvalRunner(repo_dir)
+    result = runner.run(config, extra_override=extra_override)
+
+    # Output results
+    if args.output == "json":
+        print(format_json(result))
+    else:
+        print(format_console(result))
+
+    # Save baseline
+    if args.save_baseline:
+        save_baseline(result, Path(args.save_baseline))
+        print(f"\nBaseline saved to {args.save_baseline}")
+
+    # Compare against baseline
+    if args.compare_baseline:
+        baseline = load_baseline(Path(args.compare_baseline))
+        report = compare(baseline, result)
+        print(f"\n{format_comparison(report)}")
+        if not improved_or_maintained(report):
+            sys.exit(1)
+
+    # Exit non-zero if overall pass rate is below threshold
+    if result.overall_pass_rate < 1.0:
+        sys.exit(1)
+
+
 def _build_adapter_types(user_dir):
     """Build the registry of adapter types from the user directory."""
     from cambium.adapters.claude_code import ClaudeCodeAdapter
@@ -123,6 +185,9 @@ def main() -> None:
     srv.add_argument("--port", type=int, default=8350)
     srv.add_argument("--live", action="store_true", help="Enable real claude -p execution")
     srv.add_argument("--poll-interval", type=float, default=2.0, help="Consumer poll interval in seconds")
+    srv.add_argument("--repo-dir", help="Directory with code and configs (default: cwd)")
+    srv.add_argument("--data-dir", help="Directory for runtime state — DB, memory, sessions (default: ~/.cambium)")
+    srv.add_argument("--db-path", help="Override database path (default: <data-dir>/data/cambium.db)")
     srv.add_argument("-v", "--verbose", action="store_true")
 
     # send
@@ -136,6 +201,16 @@ def main() -> None:
     chat = sub.add_parser("chat", help="Attach to a live session via Claude CLI")
     chat.add_argument("routine", help="Routine name (e.g. interactive)")
 
+    # eval
+    eval_parser = sub.add_parser("eval", help="Run evaluations against a staging instance")
+    eval_parser.add_argument("config", help="Path to eval YAML config")
+    eval_parser.add_argument("--trials", type=int, help="Override trial count")
+    eval_parser.add_argument("--config-override", help="Path to override YAML")
+    eval_parser.add_argument("--compare-baseline", help="Path to baseline JSON for comparison")
+    eval_parser.add_argument("--save-baseline", help="Save results as baseline JSON")
+    eval_parser.add_argument("--output", choices=["text", "json"], default="text")
+    eval_parser.add_argument("--repo-dir", help="Repository directory (default: cwd)")
+
     args = parser.parse_args()
     if args.command == "init":
         cmd_init(args)
@@ -145,6 +220,8 @@ def main() -> None:
         cmd_send(args)
     elif args.command == "chat":
         cmd_chat(args)
+    elif args.command == "eval":
+        cmd_eval(args)
     else:
         parser.print_help()
 

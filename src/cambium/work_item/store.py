@@ -247,9 +247,10 @@ class WorkItemStore:
         self,
         status: WorkItemStatus | None = None,
         parent_id: str | None = None,
-        limit: int = 50,
-    ) -> list[WorkItem]:
-        query = f"SELECT {self._ITEM_COLS} FROM work_items"
+        limit: int = 200,
+    ) -> tuple[list[WorkItem], int]:
+        """Return (items, total_count) — total is the untruncated count."""
+        where = ""
         conditions: list[str] = []
         params: list[Any] = []
         if status is not None:
@@ -259,11 +260,18 @@ class WorkItemStore:
             conditions.append("parent_id = ?")
             params.append(parent_id)
         if conditions:
-            query += " WHERE " + " AND ".join(conditions)
-        query += " ORDER BY priority DESC, created_at LIMIT ?"
-        params.append(limit)
-        rows = self._conn.execute(query, params).fetchall()
-        return [self._row_to_item(r) for r in rows]
+            where = " WHERE " + " AND ".join(conditions)
+
+        total = self._conn.execute(
+            f"SELECT COUNT(*) FROM work_items{where}", params
+        ).fetchone()[0]
+
+        rows = self._conn.execute(
+            f"SELECT {self._ITEM_COLS} FROM work_items{where}"
+            " ORDER BY created_at DESC LIMIT ?",
+            [*params, limit],
+        ).fetchall()
+        return [self._row_to_item(r) for r in rows], total
 
     def list_ready(self, limit: int = 50) -> list[WorkItem]:
         """List leaf items (no children) with status=ready, ordered by priority DESC."""

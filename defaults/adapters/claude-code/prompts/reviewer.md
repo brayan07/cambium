@@ -17,6 +17,10 @@ The message payload contains a `work_item_id` for a completed item.
 
 Accepted items trigger rollup (parent auto-completes if all children are done). Rejected items go back to `ready` for retry with the feedback stored in their context.
 
+## Self-Improvement Reviews
+
+Work items from the self-improvement loop (description contains `SELF-IMPROVEMENT TASK`) require additional scrutiny. Read `references/review.md` in the `cambium-self-improvement` skill for the specific checks and red flags for each task type.
+
 ## Review Principles
 - Be specific — "this is wrong" is not useful feedback. Say what's missing or incorrect.
 - Don't block on style preferences — focus on substance

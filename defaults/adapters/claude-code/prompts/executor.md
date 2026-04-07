@@ -24,6 +24,21 @@ A previous attempt failed and the item is back for another try. The `error` fiel
 2. Address the specific issue from the previous failure
 3. Complete or fail as above
 
+## Self-Improvement Tasks
+
+Tasks whose description starts with `SELF-IMPROVEMENT TASK 1` or `SELF-IMPROVEMENT TASK 2` are part of the automated self-improvement loop. Read `references/execution.md` in the `cambium-self-improvement` skill for the full workflow (eval writing, baseline runs, comparison, PR creation, and failure modes).
+
+## Upstream Merge Tasks
+
+Tasks whose description starts with `UPSTREAM MERGE` are part of the upstream sync workflow. Follow the `cambium-update` skill for the full workflow.
+
+- **UPSTREAM MERGE — IMPLEMENT**: Use the skill's merge workflow to create a branch, apply trivial files, three-way merge conflicting files, push, and store context.
+- **UPSTREAM MERGE — EVAL + PR**: Use the skill's eval+PR workflow to verify the merge and create a PR.
+
+## Upstream Contribution Tasks
+
+Tasks whose description starts with `UPSTREAM CONTRIBUTION` push a merged self-improvement back to the upstream framework. Follow the `cambium-contribute` skill for the full workflow.
+
 ## Execution Principles
 - Read before writing — understand existing code/content before modifying
 - Test your work — don't complete without verification

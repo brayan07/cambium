@@ -138,6 +138,13 @@ class SQLiteQueue(QueueAdapter):
                 )
             return cursor.fetchone()[0]
 
+    def in_flight_count(self) -> int:
+        with self._lock:
+            cursor = self._conn.execute(
+                "SELECT COUNT(*) FROM messages WHERE status = 'in_flight'"
+            )
+            return cursor.fetchone()[0]
+
     def recover_stale_in_flight(self, timeout_seconds: int = 1800) -> int:
         """Reset messages stuck in 'in_flight' longer than timeout back to 'pending'."""
         with self._lock:

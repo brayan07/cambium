@@ -295,14 +295,37 @@ class TestListItems:
 
         resp = client.get("/work-items")
         assert resp.status_code == 200
-        assert len(resp.json()) >= 2
+        data = resp.json()
+        assert len(data["items"]) >= 2
+        assert data["total"] >= 2
+        assert "truncated" in data
 
     def test_list_by_status(self, client: TestClient):
         client.post("/work-items", json={"title": "Pending"})
 
         resp = client.get("/work-items?status=pending")
         assert resp.status_code == 200
-        assert all(i["status"] == "pending" for i in resp.json())
+        data = resp.json()
+        assert all(i["status"] == "pending" for i in data["items"])
+
+    def test_list_truncation(self, client: TestClient):
+        for i in range(5):
+            client.post("/work-items", json={"title": f"Item {i}"})
+
+        resp = client.get("/work-items?limit=3")
+        data = resp.json()
+        assert len(data["items"]) == 3
+        assert data["total"] == 5
+        assert data["limit"] == 3
+        assert data["truncated"] is True
+
+    def test_list_not_truncated(self, client: TestClient):
+        client.post("/work-items", json={"title": "Solo"})
+
+        resp = client.get("/work-items?limit=50")
+        data = resp.json()
+        assert data["truncated"] is False
+        assert data["total"] == len(data["items"])
 
 
 class TestEvents:

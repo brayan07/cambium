@@ -236,8 +236,8 @@ curl -s "$CAMBIUM_API_URL/work-items/ITEM_ID/children"
 # Get full subtree
 curl -s "$CAMBIUM_API_URL/work-items/ITEM_ID/tree"
 
-# List by status
-curl -s "$CAMBIUM_API_URL/work-items?status=ready"
+# List by status (returns {items: [...], total, limit, truncated})
+curl -s "$CAMBIUM_API_URL/work-items?status=ready&limit=50"
 
 # Event history for an item
 curl -s "$CAMBIUM_API_URL/work-items/ITEM_ID/events"
@@ -340,6 +340,99 @@ Library files are digested external content (books, papers, etc.). They are refe
 ### Session digests
 
 Session digests are written by the session-summarizer routine to `sessions/YYYY-MM-DD/{short-session-id}.md`. Each digest captures what happened, what was decided, and what was learned.
+
+## Eval Framework
+
+The eval framework tests changes against staging Cambium instances. Use it for self-improvement tasks.
+
+### Running an eval
+
+```bash
+# Basic eval run
+.venv/bin/python -m cambium eval <config.yaml> --repo-dir <path>
+
+# Save results as baseline
+.venv/bin/python -m cambium eval <config.yaml> --save-baseline baselines/name.json --repo-dir <path>
+
+# Run with config override and compare against baseline
+.venv/bin/python -m cambium eval <config.yaml> \
+  --config-override <override.yaml> \
+  --compare-baseline baselines/name.json \
+  --repo-dir <path>
+
+# Override trial count
+.venv/bin/python -m cambium eval <config.yaml> --trials 1 --repo-dir <path>
+
+# JSON output
+.venv/bin/python -m cambium eval <config.yaml> --output json --repo-dir <path>
+```
+
+### Eval config format
+
+```yaml
+name: eval-name
+trials: 3
+timeout: 180
+
+# Optional: override config files in the staging instance
+config_override:
+  routines/coordinator.yaml:
+    batch_window: 5
+  adapters/claude-code/prompts/coordinator.md:
+    append: "\nNew instruction here"
+
+scenarios:
+  - name: scenario-name
+    inject:
+      channel: external_events
+      payload: { goal: "test goal" }
+    wait:
+      cascade_settled: true    # or: routine_completed: coordinator, timeout_only: true
+    assertions:
+      - type: episode
+        routine: coordinator
+        status: completed
+      - type: work_item_created
+        title_contains: "keyword"
+      - type: no_errors
+      - type: event_published
+        channel: plans
+```
+
+### Config override format (for --config-override)
+
+Override files are YAML with file paths as keys:
+
+```yaml
+# YAML files: deep-merge keys
+routines/coordinator.yaml:
+  batch_window: 5
+
+# Markdown files: append, content (full replace), or patch
+adapters/claude-code/prompts/coordinator.md:
+  append: |
+    ## New Section
+    New instruction text here.
+```
+
+### Canary eval
+
+The canary cascade (`defaults/evals/canary-cascade.yaml`) is a mandatory integration test. Always run it before creating self-improvement PRs to verify the change doesn't break the system.
+
+### Assertion types
+
+| Type | Fields | Description |
+|------|--------|-------------|
+| `episode` | `routine`, `status` | Check that a routine ran with expected status |
+| `work_item_created` | `title_contains` | Check that a work item was created |
+| `no_errors` | — | Verify no episodes have error status |
+| `event_published` | `channel` | Check that an event was published to a channel |
+| `episode_count` | `routine`, `min`, `max` | Check episode count is in range |
+| `file_exists` | `path` | Check a file exists in the staging data dir |
+| `file_contains` | `path`, `pattern` | Check a file contains a regex pattern |
+| `memory_committed` | — | Check that memory git has new commits |
+| `llm_rubric` | `target`, `rubric`, `threshold` | LLM-judged quality check |
+| `deterministic` | `script`, `threshold` | Run a script, check JSON score |
 
 ## Important
 
