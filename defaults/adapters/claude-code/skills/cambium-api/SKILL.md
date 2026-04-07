@@ -236,8 +236,8 @@ curl -s "$CAMBIUM_API_URL/work-items/ITEM_ID/children"
 # Get full subtree
 curl -s "$CAMBIUM_API_URL/work-items/ITEM_ID/tree"
 
-# List by status
-curl -s "$CAMBIUM_API_URL/work-items?status=ready"
+# List by status (returns {items: [...], total, limit, truncated})
+curl -s "$CAMBIUM_API_URL/work-items?status=ready&limit=50"
 
 # Event history for an item
 curl -s "$CAMBIUM_API_URL/work-items/ITEM_ID/events"

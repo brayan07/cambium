@@ -554,9 +554,10 @@ class TestListItems:
         store.create(b)
         store.update_status(a.id, WorkItemStatus.READY)
 
-        ready = store.list_items(status=WorkItemStatus.READY)
+        ready, total = store.list_items(status=WorkItemStatus.READY)
         assert len(ready) == 1
         assert ready[0].id == a.id
+        assert total == 1
 
     def test_list_by_parent(self):
         store = WorkItemStore()
@@ -567,12 +568,15 @@ class TestListItems:
         store.create(child)
         store.create(orphan)
 
-        children = store.list_items(parent_id=parent.id)
+        children, total = store.list_items(parent_id=parent.id)
         assert len(children) == 1
         assert children[0].id == child.id
+        assert total == 1
 
     def test_list_limit(self):
         store = WorkItemStore()
         for i in range(10):
             store.create(WorkItem.create(title=f"Item {i}"))
-        assert len(store.list_items(limit=3)) == 3
+        items, total = store.list_items(limit=3)
+        assert len(items) == 3
+        assert total == 10

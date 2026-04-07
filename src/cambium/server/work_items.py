@@ -83,6 +83,13 @@ class WorkItemResponse(BaseModel):
     updated_at: str
 
 
+class ListWorkItemsResponse(BaseModel):
+    items: list[WorkItemResponse]
+    total: int
+    limit: int
+    truncated: bool
+
+
 class DecomposeResponse(BaseModel):
     parent: WorkItemResponse
     children: list[WorkItemResponse]
@@ -367,7 +374,7 @@ def get_tree(item_id: str):
     return [_item_to_response(i) for i in items]
 
 
-@router.get("", response_model=list[WorkItemResponse])
+@router.get("", response_model=ListWorkItemsResponse)
 def list_work_items(
     status: str | None = None,
     parent_id: str | None = None,
@@ -375,8 +382,15 @@ def list_work_items(
 ):
     service = _get_service()
     status_filter = WorkItemStatus(status) if status else None
-    items = service.store.list_items(status=status_filter, parent_id=parent_id, limit=limit)
-    return [_item_to_response(i) for i in items]
+    items, total = service.store.list_items(
+        status=status_filter, parent_id=parent_id, limit=limit
+    )
+    return ListWorkItemsResponse(
+        items=[_item_to_response(i) for i in items],
+        total=total,
+        limit=limit,
+        truncated=total > limit,
+    )
 
 
 @router.get("/{item_id}/events", response_model=list[EventResponse])
