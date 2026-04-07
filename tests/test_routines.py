@@ -7,13 +7,16 @@ from cambium.adapters.base import AdapterInstanceRegistry
 
 ROUTINES_DIR = Path(__file__).parent.parent / "defaults" / "routines"
 INSTANCES_DIR = Path(__file__).parent.parent / "defaults" / "adapters" / "claude-code" / "instances"
-EXPECTED_ROUTINES = ["coordinator", "planner", "executor", "reviewer", "consolidator", "interlocutor"]
+EXPECTED_ROUTINES = [
+    "coordinator", "planner", "executor", "reviewer",
+    "consolidator", "interlocutor", "skill-testing",
+]
 
 
 class TestSeedlingRoutines:
     def test_all_routines_parse(self) -> None:
         registry = RoutineRegistry(ROUTINES_DIR)
-        assert len(registry.all()) == 6
+        assert len(registry.all()) == 7
 
     def test_expected_names(self) -> None:
         registry = RoutineRegistry(ROUTINES_DIR)
@@ -61,7 +64,7 @@ class TestSeedlingRoutines:
         for r in registry.all():
             all_published.update(r.publish)
         # External/system-consumed channels don't need internal listeners
-        external = {"schedule", "reflections", "input_needed"}
+        external = {"schedule", "reflections", "input_needed", "skill_test_passed", "skill_test_failed"}
         internal_published = all_published - external
         unhandled = internal_published - all_listened
         assert not unhandled, f"Published channels with no listener: {unhandled}"

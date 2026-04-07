@@ -1,0 +1,6 @@
+name: skill-testing
+adapter_type: claude-code
+config:
+  model: sonnet
+  system_prompt_path: adapters/claude-code/prompts/skill-testing.md
+  skills: [cambium-api, skillgrade]

@@ -37,6 +37,11 @@ These are the channels in the system. Your routine can only publish to a subset 
 | `reflections` | Observations from the consolidator about patterns and improvements |
 | `sessions_completed` | Session lifecycle events (system-emitted) |
 | `input_needed` | Requests for user input (auto-persisted to central store) |
+| `skill_created` | A new skill was added (triggers testing) |
+| `skill_updated` | An existing skill was modified (triggers testing) |
+| `skill_deploy_requested` | Explicit request to validate a skill before deployment |
+| `skill_test_passed` | Skill passed its evaluation suite |
+| `skill_test_failed` | Skill failed its evaluation suite |
 
 ## Checking Your Permissions
 
