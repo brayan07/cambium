@@ -12,3 +12,14 @@ self_improvement:
 
   # Hard cap on open self-improvement PRs (prevents PR flooding)
   max_pending_improvement_prs: 3
+
+  # Enable contributing merged self-improvements back to upstream framework
+  contribute_upstream: false
+
+  # Determines how upstream PRs are created:
+  #   author       — has push access to upstream repo (creates branch directly)
+  #   contributor  — no push access (forks and PRs from fork)
+  upstream_role: contributor
+
+  # Set automatically on first contribution (fork URL for contributors)
+  fork_remote: null

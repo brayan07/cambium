@@ -79,6 +79,55 @@ curl -s -X POST "$CAMBIUM_API_URL/work-items/{work_item_id}/decompose" \
 
 The `SELF-IMPROVEMENT TASK 1` and `SELF-IMPROVEMENT TASK 2` prefixes are how the executor identifies self-improvement work.
 
+## Upstream Merge Proposals
+
+When you fetch a work item and its `context.type` is `"upstream_merge"`, the sentry has detected new upstream framework commits that need merging. The context contains `upstream_commit` and `base_commit`.
+
+### Decomposition
+
+Decompose into exactly **2 tasks**: one for the merge implementation, one for eval + PR. The implement task handles file classification, merging, and pushing. The eval task verifies and creates the PR.
+
+```bash
+curl -s -X POST "$CAMBIUM_API_URL/work-items/{work_item_id}/decompose" \
+  -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer $CAMBIUM_TOKEN" \
+  -d '{
+    "children": [
+      {
+        "title": "Merge upstream changes to branch",
+        "description": "UPSTREAM MERGE — IMPLEMENT\n\nUpstream commit: {upstream_commit}\nBase commit: {base_commit}\n\nClassify changed files (trivial vs. conflicting), create merge branch, apply all changes, and push. Store branch name and merge decisions in work item context.",
+        "priority": 5
+      },
+      {
+        "title": "Eval + PR for upstream merge",
+        "description": "UPSTREAM MERGE — EVAL + PR\n\nUpstream commit: {upstream_commit}\n\nRead the merge branch name from work item context (set by Task 1). Run canary eval on the branch. If passing, update .cambium-version and create PR with changelog and merge decisions. If failing, report failures.",
+        "depends_on": ["$0"]
+      }
+    ]
+  }'
+```
+
+## Upstream Contribution Proposals
+
+When `context.type` is `"upstream_contribution"`, a merged self-improvement PR has been tagged for contribution back to the upstream framework. The context contains `source_pr`, `merge_commit`, and `upstream_role`.
+
+Decompose into a single task:
+
+```bash
+curl -s -X POST "$CAMBIUM_API_URL/work-items/{work_item_id}/decompose" \
+  -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer $CAMBIUM_TOKEN" \
+  -d '{
+    "children": [
+      {
+        "title": "Create upstream PR for improvement: {source_pr_title}",
+        "description": "UPSTREAM CONTRIBUTION\n\nSource PR: #{source_pr}\nMerge commit: {merge_commit}\nUpstream role: {upstream_role}\n\nCherry-pick the merge commit to the upstream repo and create a PR.",
+        "priority": 2
+      }
+    ]
+  }'
+```
+
 ## Planning Principles
 - Tasks must be atomic — completable in one session
 - Each task child needs a clear title and description with acceptance criteria

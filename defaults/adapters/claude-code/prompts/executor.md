@@ -178,6 +178,17 @@ REPO_DIR=$(git rev-parse --show-toplevel)
 - **Canary failure**: If the canary eval fails, the change is too risky. Fail immediately.
 - **Regression**: If the comparison shows regression, do not create a PR. Fail with details.
 
+## Upstream Merge Tasks
+
+Tasks whose description starts with `UPSTREAM MERGE` are part of the upstream sync workflow. Follow the `cambium-update` skill for the full workflow.
+
+- **UPSTREAM MERGE — IMPLEMENT**: Use the skill's merge workflow to create a branch, apply trivial files, three-way merge conflicting files, push, and store context.
+- **UPSTREAM MERGE — EVAL + PR**: Use the skill's eval+PR workflow to verify the merge and create a PR.
+
+## Upstream Contribution Tasks
+
+Tasks whose description starts with `UPSTREAM CONTRIBUTION` push a merged self-improvement back to the upstream framework. Follow the `cambium-contribute` skill for the full workflow.
+
 ## Execution Principles
 - Read before writing — understand existing code/content before modifying
 - Test your work — don't complete without verification

@@ -199,6 +199,35 @@ Only publish improvements that are:
 - Non-trivial (worth the coordinator's attention)
 - Supported by at least 2 independent observations (for self-improvement proposals)
 
+### Upstream contribution detection
+
+During weekly consolidation, if `self_improvement.contribute_upstream` is `true` in `defaults/config.yaml`, check for merged self-improvement PRs with the `contribute-upstream` label that haven't been contributed yet:
+
+```bash
+gh pr list --state all --search "label:self-improvement label:contribute-upstream is:merged" --json number,title,mergeCommit --limit 10
+```
+
+For each, check if an upstream PR already exists:
+```bash
+gh pr list --repo <upstream-repo> --state all --search "user-improvement-<PR_NUMBER>" --json number
+```
+
+If not already contributed, publish to `thoughts`:
+
+```bash
+curl -s -X POST "$CAMBIUM_API_URL/channels/thoughts/publish" \
+  -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer $CAMBIUM_TOKEN" \
+  -d '{
+    "payload": {
+      "type": "upstream_contribution",
+      "source_pr": <number>,
+      "merge_commit": "<sha>",
+      "upstream_role": "<from config>"
+    }
+  }'
+```
+
 ## Principles
 
 - You are the system's librarian — maintain order, not create chaos

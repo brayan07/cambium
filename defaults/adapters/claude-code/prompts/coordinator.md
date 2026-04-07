@@ -49,6 +49,65 @@ Use priority 3 (low-medium) for self-improvement — it should not preempt user-
 
 For **general improvement proposals** (payload `type: "improvement_proposal"`), create a regular work item with the proposed action as the description.
 
+For **upstream update notifications** (payload `type: "upstream_update"`), the sentry has detected new upstream framework commits. Check for duplicates first — if an active upstream merge work item already exists, skip it.
+
+If the policy is `notify`, create an informational work item so the user is aware:
+
+```bash
+curl -s -X POST "$CAMBIUM_API_URL/work-items" \
+  -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer $CAMBIUM_TOKEN" \
+  -d '{
+    "title": "Upstream has <commit_count> new commits (notification only)",
+    "description": "The upstream Cambium framework has new changes. Run cambium update manually to merge.\n\nUpstream commit: <upstream_commit>\nBase commit: <base_commit>",
+    "priority": 2,
+    "context": {
+      "type": "upstream_notification",
+      "upstream_commit": "<from payload>",
+      "base_commit": "<from payload>"
+    }
+  }'
+```
+
+If the policy is `auto`, create a merge work item for the planner:
+
+```bash
+curl -s -X POST "$CAMBIUM_API_URL/work-items" \
+  -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer $CAMBIUM_TOKEN" \
+  -d '{
+    "title": "Merge upstream changes (<commit_count> commits)",
+    "description": "Upstream has <commit_count> new commits since last sync.\n\nUpstream commit: <upstream_commit>\nBase commit: <base_commit>",
+    "priority": 5,
+    "context": {
+      "type": "upstream_merge",
+      "upstream_commit": "<from payload>",
+      "base_commit": "<from payload>"
+    }
+  }'
+```
+
+Note: The planner will classify files (trivial vs. conflicting) during decomposition — the coordinator does not need to do this.
+
+For **upstream contribution proposals** (payload `type: "upstream_contribution"`), the consolidator or sentry has identified a merged self-improvement PR tagged for contribution back to the framework:
+
+```bash
+curl -s -X POST "$CAMBIUM_API_URL/work-items" \
+  -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer $CAMBIUM_TOKEN" \
+  -d '{
+    "title": "Contribute improvement upstream: <title>",
+    "description": "Merged self-improvement PR #<source_pr> has the contribute-upstream label.",
+    "priority": 2,
+    "context": {
+      "type": "upstream_contribution",
+      "source_pr": "<from payload>",
+      "merge_commit": "<from payload>",
+      "upstream_role": "<from payload>"
+    }
+  }'
+```
+
 ## Decision Principles
 - **Never execute work yourself** — always delegate via work items
 - One work item per goal — don't create avalanches

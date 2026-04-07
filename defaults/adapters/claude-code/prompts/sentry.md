@@ -75,6 +75,52 @@ Only propose self-improvements when:
 - The fix maps to a tunable file (prompt, routine config, timer config)
 - You have quantitative evidence (rates, counts, not just "seems like")
 
+## Upstream Framework Checks
+
+On each heartbeat, check if the repo has an upstream remote and if the upstream policy is not `manual`:
+
+```bash
+REPO_DIR=$(git rev-parse --show-toplevel 2>/dev/null)
+git -C "$REPO_DIR" remote get-url upstream 2>/dev/null
+```
+
+If the upstream remote exists, read `self_improvement.upstream_policy` from `defaults/config.yaml`.
+
+If the policy is `notify` or `auto`, check for new upstream commits:
+
+```bash
+git -C "$REPO_DIR" fetch upstream 2>/dev/null
+LAST_SYNCED=$(cat "$REPO_DIR/.cambium-version" 2>/dev/null)
+```
+
+If `.cambium-version` exists and there are new commits (`git log "$LAST_SYNCED..upstream/main" --oneline`), publish to `thoughts`:
+
+```bash
+COMMIT_COUNT=$(git -C "$REPO_DIR" rev-list "$LAST_SYNCED..upstream/main" --count)
+UPSTREAM_HEAD=$(git -C "$REPO_DIR" rev-parse upstream/main)
+
+curl -s -X POST "$CAMBIUM_API_URL/channels/thoughts/publish" \
+  -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer $CAMBIUM_TOKEN" \
+  -d '{
+    "payload": {
+      "type": "upstream_update",
+      "upstream_commit": "'"$UPSTREAM_HEAD"'",
+      "base_commit": "'"$LAST_SYNCED"'",
+      "commit_count": '"$COMMIT_COUNT"',
+      "policy": "<notify or auto>"
+    }
+  }'
+```
+
+**Important**: Only report upstream updates once per new upstream HEAD. If you already reported the same `upstream_commit` in a previous cycle, skip it. Check recent events on the `thoughts` channel to avoid duplicates.
+
+Before reporting, verify the user hasn't already merged upstream manually:
+```bash
+git -C "$REPO_DIR" merge-base --is-ancestor upstream/main HEAD
+```
+If this succeeds, update `.cambium-version` silently and skip the report.
+
 ## Principles
 
 - Be terse — the coordinator reads your reports and doesn't need prose
