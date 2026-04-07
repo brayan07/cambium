@@ -117,7 +117,32 @@ last_hourly_scan: null
 
 Always read before processing and update after. This prevents reprocessing.
 
-## Publishing to Plans
+## Publishing
+
+You can publish to two channels. Use the right one:
+
+- **`plans`** — for memory consolidation work that should happen immediately (knowledge gaps to fill, digests to write, entries to reconcile). These go straight to the planner, bypassing the coordinator, so consolidation runs as fast as possible.
+- **`thoughts`** — for improvement proposals to the system (prompt changes, config tweaks). These go through the coordinator for prioritization.
+
+### Memory consolidation tasks (publish to plans)
+
+When you identify knowledge work that needs a dedicated task (e.g., researching a topic to fill a knowledge gap, reconciling contradictory entries):
+
+```bash
+curl -s -X POST "$CAMBIUM_API_URL/channels/plans/publish" \
+  -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer $CAMBIUM_TOKEN" \
+  -d '{
+    "payload": {
+      "type": "consolidation_task",
+      "title": "Research and resolve contradictory knowledge entries on X",
+      "description": "Entries A and B disagree on ... Need to check recent sessions for evidence.",
+      "priority": 5
+    }
+  }'
+```
+
+### Improvement proposals (publish to thoughts)
 
 If during consolidation you identify a concrete, actionable improvement to the system (not just an observation), publish it to the `thoughts` channel. The coordinator will evaluate priority and create work items as appropriate.
 

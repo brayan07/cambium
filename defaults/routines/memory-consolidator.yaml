@@ -1,6 +1,6 @@
 name: memory-consolidator
 adapter_instance: memory-consolidator
 listen: [heartbeat]
-publish: [thoughts]
+publish: [thoughts, plans]
 suppress_completion_event: true
 max_concurrency: 1
