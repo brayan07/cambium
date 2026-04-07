@@ -156,44 +156,74 @@ def _authenticate(authorization: str | None) -> dict:
     return authenticate(authorization)
 
 
+def _resolve_config_dir(repo_dir: Path) -> Path:
+    """Find the config root within a repo directory.
+
+    Supports two layouts:
+    - Combined repo: ``repo_dir/defaults/routines/`` (framework repo with defaults/)
+    - Legacy init: ``repo_dir/routines/`` (old cambium init flat copy)
+    """
+    if (repo_dir / "defaults" / "routines").exists():
+        return repo_dir / "defaults"
+    return repo_dir
+
+
 def build_server(
     db_path: str | None = None,
     user_dir: Path | None = None,
+    repo_dir: Path | None = None,
+    data_dir: Path | None = None,
     live: bool = False,
     poll_interval: float = 2.0,
     api_base_url: str = "http://127.0.0.1:8350",
 ) -> CambiumServer:
     """Construct all Cambium components and return a CambiumServer.
 
-    All configuration is read from ``user_dir`` (default ``~/.cambium/``).
-    Run ``cambium init`` first to seed the user directory from framework defaults.
+    Configuration is read from ``repo_dir`` (code + configs). Runtime state
+    (database, memory, sessions) is written to ``data_dir``.
+
+    For backward compatibility, ``user_dir`` can be passed instead — it sets
+    both ``repo_dir`` and ``data_dir`` to the same path (the legacy layout
+    where ``~/.cambium/`` holds everything).
+
+    Defaults:
+    - ``repo_dir``: current working directory
+    - ``data_dir``: ``~/.cambium/``
     """
-    user_dir = user_dir or Path.home() / ".cambium"
+    # Backward compat: user_dir sets both if the new params aren't given
+    if user_dir is not None:
+        repo_dir = repo_dir or user_dir
+        data_dir = data_dir or user_dir
+    else:
+        repo_dir = repo_dir or Path.cwd()
+        data_dir = data_dir or Path.home() / ".cambium"
+
+    config_dir = _resolve_config_dir(repo_dir)
 
     # Queue
     if db_path is None:
-        db_dir = user_dir / "data"
+        db_dir = data_dir / "data"
         db_dir.mkdir(parents=True, exist_ok=True)
         db_path = str(db_dir / "cambium.db")
     queue = SQLiteQueue(db_path)
 
     # Skill registry
-    skill_dirs = [user_dir / "adapters" / "claude-code" / "skills"]
+    skill_dirs = [config_dir / "adapters" / "claude-code" / "skills"]
     skill_registry = SkillRegistry(*[d for d in skill_dirs if d.exists()])
 
     # Adapter instances
-    instance_dirs = [user_dir / "adapters" / "claude-code" / "instances"]
+    instance_dirs = [config_dir / "adapters" / "claude-code" / "instances"]
     instance_registry = AdapterInstanceRegistry(*[d for d in instance_dirs if d.exists()])
 
     # MCP registry
-    mcp_registry = FileRegistry(user_dir / "mcp-servers.json")
+    mcp_registry = FileRegistry(config_dir / "mcp-servers.json")
 
-    # Adapter types
-    claude_adapter = ClaudeCodeAdapter(skill_registry, user_dir=user_dir, mcp_registry=mcp_registry)
+    # Adapter types — pass config_dir so prompts resolve correctly
+    claude_adapter = ClaudeCodeAdapter(skill_registry, user_dir=config_dir, mcp_registry=mcp_registry)
     adapter_types = {claude_adapter.name: claude_adapter}
 
     # Routine registry
-    routine_registry = RoutineRegistry(*[d for d in [user_dir / "routines"] if d.exists()])
+    routine_registry = RoutineRegistry(*[d for d in [config_dir / "routines"] if d.exists()])
 
     # Session store (shares DB with queue)
     session_store = SessionStore(db_path)
@@ -204,13 +234,13 @@ def build_server(
     # Broadcaster registry for live streaming
     broadcaster_registry = BroadcasterRegistry()
 
-    # Routine runner
+    # Routine runner — data_dir for session working directories
     routine_runner = RoutineRunner(
         adapter_types=adapter_types,
         instance_registry=instance_registry,
         session_store=session_store,
         api_base_url=api_base_url,
-        user_dir=user_dir,
+        user_dir=data_dir,
     )
     routine_runner.episode_store = episode_store
 
@@ -250,15 +280,17 @@ def build_server(
     global _episode_store
     _episode_store = episode_store
 
-    # Memory service — ensure the long-term memory directory exists
-    memory_dir = user_dir / "memory"
+    # Memory service — lives in data_dir
+    memory_dir = data_dir / "memory"
     memory_service = MemoryService(memory_dir)
     log.info(f"Memory directory: {memory_service.path}")
 
-    # Timer loop
-    timers = load_timers(user_dir / "timers.yaml")
+    # Timer loop — config lives in repo
+    timers = load_timers(config_dir / "timers.yaml")
     timer_loop = TimerLoop(timers, queue) if timers else None
 
+    log.info(f"Config dir: {config_dir}")
+    log.info(f"Data dir: {data_dir}")
     log.info(f"Skills: {skill_registry.names()}")
     log.info(f"Adapter instances: {[i.name for i in instance_registry.all()]}")
     log.info(f"Routines: {[r.name for r in routine_registry.all()]}")
@@ -406,11 +438,21 @@ def run_server(
     live: bool = False,
     poll_interval: float = 2.0,
     log_level: str = "info",
+    repo_dir: Path | None = None,
+    data_dir: Path | None = None,
+    db_path: str | None = None,
 ) -> None:
     global _server
     logging.basicConfig(
         level=getattr(logging, log_level.upper()),
         format="%(asctime)s [%(name)s] %(message)s",
     )
-    _server = build_server(live=live, poll_interval=poll_interval)
+    _server = build_server(
+        live=live,
+        poll_interval=poll_interval,
+        repo_dir=repo_dir,
+        data_dir=data_dir,
+        db_path=db_path,
+        api_base_url=f"http://{host}:{port}",
+    )
     uvicorn.run(app, host=host, port=port, log_level=log_level)

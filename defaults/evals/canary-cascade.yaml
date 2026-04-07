@@ -1,0 +1,78 @@
+name: canary-cascade
+trials: 1
+timeout: 300
+
+# Override ALL adapter instances to sonnet — tests structure, not quality.
+# Haiku is too weak for multi-tool orchestration (fails to execute curl calls).
+# Sonnet is cheap enough for a canary (~$0.30-0.50) and reliably uses tools.
+config_override:
+  adapters/claude-code/instances/coordinator.yaml:
+    config:
+      model: sonnet
+  adapters/claude-code/instances/planner.yaml:
+    config:
+      model: sonnet
+  adapters/claude-code/instances/executor.yaml:
+    config:
+      model: sonnet
+  adapters/claude-code/instances/reviewer.yaml:
+    config:
+      model: sonnet
+  adapters/claude-code/instances/sentry.yaml:
+    config:
+      model: sonnet
+  adapters/claude-code/instances/memory-consolidator.yaml:
+    config:
+      model: sonnet
+  adapters/claude-code/instances/session-summarizer.yaml:
+    config:
+      model: sonnet
+
+scenarios:
+  - name: full-system-activation
+    inject:
+      # 1. Kick off main cascade: coordinator -> planner -> executor -> reviewer
+      - channel: external_events
+        payload:
+          goal: "Create a file called hello.txt containing 'hello world'"
+      # 2. Trigger sentry health check
+      - channel: heartbeat
+        payload:
+          window: micro
+          target: sentry
+      # 3. Trigger memory consolidator (hourly scan — finds empty state, completes cleanly)
+      - channel: heartbeat
+        payload:
+          window: hourly
+          target: memory-consolidator
+    wait:
+      cascade_settled: true
+    assertions:
+      # Main cascade (4 routines)
+      - type: episode
+        routine: coordinator
+        status: completed
+      - type: episode
+        routine: planner
+        status: completed
+      - type: episode
+        routine: executor
+        status: completed
+      - type: episode
+        routine: reviewer
+        status: completed
+      # Background routines (3 routines)
+      - type: episode
+        routine: session-summarizer
+        status: completed
+      - type: episode
+        routine: sentry
+        status: completed
+      - type: episode
+        routine: memory-consolidator
+        status: completed
+      # Work item lifecycle
+      - type: work_item_created
+        title_contains: hello
+      # System health
+      - type: no_errors

@@ -1,0 +1,34 @@
+name: coordinator-triage-quality
+trials: 3
+timeout: 120
+
+scenarios:
+  - name: ambiguous-request
+    inject:
+      channel: external_events
+      payload:
+        goal: "Look into caching"
+    wait:
+      routine_completed: coordinator
+    assertions:
+      - type: episode
+        routine: coordinator
+        status: completed
+      - type: work_item_created
+        title_contains: caching
+      - type: no_errors
+
+  - name: specific-request
+    inject:
+      channel: external_events
+      payload:
+        goal: "Add retry logic to the HTTP adapter with exponential backoff"
+    wait:
+      routine_completed: coordinator
+    assertions:
+      - type: episode
+        routine: coordinator
+        status: completed
+      - type: work_item_created
+        title_contains: retry
+      - type: no_errors
