@@ -75,7 +75,11 @@ class StagingContext:
         return self.get("/events", params=kwargs)
 
     def work_items(self, **kwargs) -> list[dict]:
-        return self.get("/work-items", params=kwargs)
+        resp = self.get("/work-items", params=kwargs)
+        # API returns {items: [...], total, limit, truncated}
+        if isinstance(resp, dict):
+            return resp.get("items", [])
+        return resp
 
 
 def _find_free_port() -> int:

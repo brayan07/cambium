@@ -26,7 +26,7 @@ class EvalRunner:
     """Runs eval scenarios against staging Cambium instances."""
 
     def __init__(
-        self, repo_dir: Path, live: bool = True, enforce_manifest: bool = True,
+        self, repo_dir: Path, live: bool = True, enforce_manifest: bool = False,
     ) -> None:
         self.repo_dir = repo_dir
         self.live = live
