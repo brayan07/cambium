@@ -168,7 +168,7 @@ class EpisodeStore:
                 query += " AND routine = ?"
                 params.append(routine)
 
-            query += " ORDER BY started_at DESC LIMIT ?"
+            query += " ORDER BY started_at DESC, rowid DESC LIMIT ?"
             params.append(limit)
 
             rows = self._conn.execute(query, params).fetchall()
@@ -192,7 +192,7 @@ class EpisodeStore:
                 "trigger_event_ids, emitted_event_ids, session_acknowledged, "
                 "session_summary, summarizer_acknowledged, digest_path "
                 f"FROM episodes WHERE {condition} AND status != 'running' "
-                "ORDER BY started_at DESC LIMIT ?"
+                "ORDER BY started_at DESC, rowid DESC LIMIT ?"
             )
             rows = self._conn.execute(query, (limit,)).fetchall()
             return [self._row_to_episode(r) for r in rows]
@@ -263,7 +263,7 @@ class EpisodeStore:
 
             if conditions:
                 query += " WHERE " + " AND ".join(conditions)
-            query += " ORDER BY timestamp DESC LIMIT ?"
+            query += " ORDER BY timestamp DESC, rowid DESC LIMIT ?"
             params.append(limit)
 
             rows = self._conn.execute(query, params).fetchall()

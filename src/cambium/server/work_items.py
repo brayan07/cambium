@@ -89,6 +89,7 @@ class DecomposeResponse(BaseModel):
 
 
 class EventResponse(BaseModel):
+    seq: int | None
     id: str
     item_id: str
     event_type: str
@@ -152,6 +153,7 @@ def _item_to_response(item) -> WorkItemResponse:
 
 def _event_to_response(event) -> EventResponse:
     return EventResponse(
+        seq=event.seq,
         id=event.id,
         item_id=event.item_id,
         event_type=event.event_type,
@@ -389,7 +391,7 @@ def get_item_events(item_id: str, event_type: str | None = None, limit: int = 10
 @router.get("/events/all", response_model=list[EventResponse])
 def get_all_events(
     event_type: str | None = None,
-    after: str | None = None,
+    after: int | None = None,
     limit: int = 100,
 ):
     service = _get_service()

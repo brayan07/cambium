@@ -56,7 +56,8 @@ class WorkItemStore:
                 ON work_items(parent_id);
 
             CREATE TABLE IF NOT EXISTS work_item_events (
-                id TEXT PRIMARY KEY,
+                seq INTEGER PRIMARY KEY AUTOINCREMENT,
+                id TEXT NOT NULL UNIQUE,
                 item_id TEXT NOT NULL REFERENCES work_items(id),
                 event_type TEXT NOT NULL,
                 actor TEXT,
@@ -133,13 +134,14 @@ class WorkItemStore:
 
     def _row_to_event(self, row: tuple) -> WorkItemEvent:
         return WorkItemEvent(
-            id=row[0],
-            item_id=row[1],
-            event_type=row[2],
-            actor=row[3],
-            session_id=row[4],
-            data=json.loads(row[5]),
-            created_at=row[6],
+            seq=row[0],
+            id=row[1],
+            item_id=row[2],
+            event_type=row[3],
+            actor=row[4],
+            session_id=row[5],
+            data=json.loads(row[6]),
+            created_at=row[7],
         )
 
     _ITEM_COLS = (
@@ -149,7 +151,7 @@ class WorkItemStore:
         "reviewed_by, reviewed_at, created_at, updated_at"
     )
 
-    _EVENT_COLS = "id, item_id, event_type, actor, session_id, data, created_at"
+    _EVENT_COLS = "seq, id, item_id, event_type, actor, session_id, data, created_at"
 
     # ── CRUD ─────────────────────────────────────────────────────────
 
@@ -623,7 +625,7 @@ class WorkItemStore:
         self,
         item_id: str | None = None,
         event_type: str | None = None,
-        after: str | None = None,
+        after: int | None = None,
         limit: int = 100,
     ) -> list[WorkItemEvent]:
         query = f"SELECT {self._EVENT_COLS} FROM work_item_events"
@@ -636,11 +638,11 @@ class WorkItemStore:
             conditions.append("event_type = ?")
             params.append(event_type)
         if after is not None:
-            conditions.append("created_at > ?")
+            conditions.append("seq > ?")
             params.append(after)
         if conditions:
             query += " WHERE " + " AND ".join(conditions)
-        query += " ORDER BY created_at LIMIT ?"
+        query += " ORDER BY seq LIMIT ?"
         params.append(limit)
         rows = self._conn.execute(query, params).fetchall()
         return [self._row_to_event(r) for r in rows]

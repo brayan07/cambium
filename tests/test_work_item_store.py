@@ -520,7 +520,7 @@ class TestEventLog:
         first_event = store.get_events(item_id=item.id)[0]
         store.update_status(item.id, WorkItemStatus.READY)
 
-        events = store.get_events(item_id=item.id, after=first_event.created_at)
+        events = store.get_events(item_id=item.id, after=first_event.seq)
         assert len(events) == 1
         assert events[0].event_type == "status_changed"
 
