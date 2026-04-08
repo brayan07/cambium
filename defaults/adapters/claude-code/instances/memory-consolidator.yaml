@@ -1,6 +1,6 @@
 name: memory-consolidator
 adapter_type: claude-code
 config:
-  model: opus
+  model: sonnet
   system_prompt_path: adapters/claude-code/prompts/memory-consolidator.md
-  skills: [cambium-api, cambium-self-improvement]
+  skills: [cambium-api, cambium-self-improvement, user-alignment]

@@ -1,0 +1,79 @@
+# Eval: Session-summarizer detects preference signals in session transcripts.
+#
+# Strategy: Inject a goal that contains explicit preference statements.
+# The coordinator processes it, generating a session. When that session completes,
+# the session-summarizer runs. We wait for the summarizer to complete, then check
+# its digest for a "Preference Signals" section.
+#
+# Wait condition: routine_completed for session-summarizer (not cascade_settled,
+# which never settles because downstream routines keep spawning more work).
+#
+# Cost: ~$0.50-1 per trial
+name: preference-signal-detection
+trials: 3
+timeout: 300
+
+config_override:
+  adapters/claude-code/instances/coordinator.yaml:
+    config:
+      model: sonnet
+  adapters/claude-code/instances/planner.yaml:
+    config:
+      model: sonnet
+  adapters/claude-code/instances/executor.yaml:
+    config:
+      model: sonnet
+  adapters/claude-code/instances/reviewer.yaml:
+    config:
+      model: sonnet
+  adapters/claude-code/instances/session-summarizer.yaml:
+    config:
+      model: sonnet
+  adapters/claude-code/instances/sentry.yaml:
+    config:
+      model: sonnet
+  adapters/claude-code/instances/memory-consolidator.yaml:
+    config:
+      model: sonnet
+
+scenarios:
+  - name: cascade-produces-preference-aware-digests
+    inject:
+      - channel: external_events
+        payload:
+          goal: >
+            The user has explicitly stated: 'I always prefer deep-dive research
+            over surface-level surveys. Never do a quick overview when I ask for
+            research — go deep.' Create a research task about caching strategies
+            that respects this preference.
+    wait:
+      routine_completed: session-summarizer
+    assertions:
+      - type: episode
+        routine: session-summarizer
+        status: completed
+      - type: memory_committed
+      - type: deterministic
+        path: defaults/evals/scripts/check-preference-signals-in-digests.sh
+        threshold: 0.5
+      - type: no_errors
+
+  - name: explicit-correction-detected
+    inject:
+      - channel: external_events
+        payload:
+          goal: >
+            User feedback: 'Don't split refactors into multiple PRs — I strongly
+            prefer a single bundled PR for related changes. The last time you split
+            it into 4 PRs it was just churn.' Handle this feedback appropriately.
+    wait:
+      routine_completed: session-summarizer
+    assertions:
+      - type: episode
+        routine: session-summarizer
+        status: completed
+      - type: memory_committed
+      - type: deterministic
+        path: defaults/evals/scripts/check-preference-signals-in-digests.sh
+        threshold: 0.5
+      - type: no_errors

@@ -1,0 +1,90 @@
+# Eval: Overload suppression (Phases 1 + 4)
+#
+# Tests that the coordinator reads the attention budget belief, detects that the
+# user queue is overloaded (many pending requests), and suppresses preference
+# requests while noting the overload in work item descriptions.
+#
+# Seed: attention budget belief (low tolerance) + multiple pending requests
+# Trigger: external_event goal
+# Assert: work item created with overload mention, no new preference requests
+#
+# Cost: ~$0.50 per trial (coordinator only)
+name: cross-phase-overload-suppression
+trials: 3
+timeout: 300
+
+config_override:
+  adapters/claude-code/instances/coordinator.yaml:
+    config:
+      model: sonnet
+
+scenarios:
+  - name: coordinator-suppresses-preferences-during-overload
+    seed_data:
+      # Attention budget belief with low tolerance
+      - path: memory/knowledge/user/preferences/attention-budget.md
+        content: |
+          ---
+          title: Attention budget
+          confidence: 0.8
+          last_confirmed: 2026-04-07
+          ---
+          User typically responds to requests within 3 hours during business hours.
+          Comfortable handling approximately 3 requests per day. Preference requests
+          that go unanswered tend to expire.
+
+          **Evidence:**
+          - Week of 2026-03-25: 10 requests answered (avg 2.5hr), 5 expired
+          - Week of 2026-04-01: 8 requests answered (avg 3.1hr), 4 expired
+          - Daily capacity estimate: ~3 requests/day
+
+    seed_requests:
+      # Seed 5 pending preference requests to exceed the budget tolerance of 3
+      - type: preference
+        summary: "Code style preference: tabs vs spaces"
+        detail: "Which indentation style should we use?"
+        options: ["tabs", "spaces"]
+        default: "spaces"
+        timeout_hours: 48
+      - type: preference
+        summary: "Documentation format preference"
+        detail: "Should docs be in markdown or RST?"
+        options: ["markdown", "rst"]
+        default: "markdown"
+        timeout_hours: 48
+      - type: preference
+        summary: "Test framework preference"
+        detail: "Should we use pytest or unittest?"
+        options: ["pytest", "unittest"]
+        default: "pytest"
+        timeout_hours: 48
+      - type: permission
+        summary: "Permission to deploy staging build"
+        detail: "Staging build is ready. Deploy?"
+        options: ["approve", "reject"]
+      - type: preference
+        summary: "Logging verbosity preference"
+        detail: "Should we default to DEBUG or INFO level logging?"
+        options: ["DEBUG", "INFO"]
+        default: "INFO"
+        timeout_hours: 48
+
+    inject:
+      - channel: external_events
+        payload:
+          goal: >
+            Research best practices for database connection pooling in Python.
+            Summarize findings in a wiki article.
+
+    wait:
+      routine_completed: coordinator
+
+    assertions:
+      - type: episode
+        routine: coordinator
+        status: completed
+      - type: work_item_created
+      - type: deterministic
+        path: defaults/evals/scripts/check-overload-handling.sh
+        threshold: 0.5
+      - type: no_errors

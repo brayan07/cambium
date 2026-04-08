@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import subprocess
 import time
 from pathlib import Path
 from typing import Any
@@ -87,6 +88,14 @@ class EvalRunner:
         start = time.monotonic()
         try:
             with StagingEnvironment(self.repo_dir, config_override, live=self.live) as ctx:
+                # Seed data files into the staging data dir
+                if scenario.seed_data:
+                    self._seed_data(ctx, scenario.seed_data)
+
+                # Seed requests into the staging DB
+                if scenario.seed_requests:
+                    self._seed_requests(ctx, scenario.seed_requests)
+
                 # Inject messages
                 for injection in scenario.inject:
                     if injection.delay > 0:
@@ -118,6 +127,51 @@ class EvalRunner:
                 duration=duration,
                 error=str(e),
             )
+
+    def _seed_data(self, ctx: StagingContext, seed_files) -> None:
+        """Write seed files into the staging data dir and git-commit them.
+
+        Files are written into the memory subdirectory (already initialized as
+        a git repo by MemoryService).  After writing, files are staged and
+        committed so the consolidator and other routines can see them.
+        """
+        memory_dir = ctx.data_dir / "memory"
+        for sf in seed_files:
+            target = ctx.data_dir / sf.path
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(sf.content)
+            log.debug(f"    Seeded {sf.path}")
+
+        # Git-commit seeded files in the memory repo
+        if memory_dir.exists() and (memory_dir / ".git").exists():
+            subprocess.run(
+                ["git", "add", "."], cwd=memory_dir,
+                capture_output=True, check=True,
+            )
+            subprocess.run(
+                ["git", "commit", "-m", "Seed eval fixtures"],
+                cwd=memory_dir, capture_output=True, check=True,
+            )
+            log.debug("    Committed seed data to memory repo")
+
+    def _seed_requests(self, ctx: StagingContext, seed_requests) -> None:
+        """Seed requests into the staging DB via the /requests/seed endpoint."""
+        for sr in seed_requests:
+            payload = {
+                "type": sr.type,
+                "summary": sr.summary,
+                "detail": sr.detail,
+                "session_id": sr.session_id,
+                "created_by": sr.created_by,
+            }
+            if sr.options:
+                payload["options"] = sr.options
+            if sr.default:
+                payload["default"] = sr.default
+            if sr.timeout_hours:
+                payload["timeout_hours"] = sr.timeout_hours
+            ctx.post("/requests/seed", payload)
+            log.debug(f"    Seeded request: {sr.summary}")
 
     def _wait(self, ctx: StagingContext, wait, timeout: int) -> None:
         """Wait for the specified condition."""

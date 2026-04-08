@@ -53,6 +53,28 @@ class Assertion:
 
 
 @dataclass
+class SeedFile:
+    """A file to pre-seed into the staging data dir before the eval runs."""
+
+    path: str  # relative to data_dir (e.g., "memory/sessions/2026-04-08-test.md")
+    content: str
+
+
+@dataclass
+class SeedRequest:
+    """A request to pre-seed into the staging DB before the eval runs."""
+
+    type: str  # permission, information, preference
+    summary: str
+    detail: str = ""
+    options: list[str] | None = None
+    default: str | None = None
+    timeout_hours: float | None = None
+    session_id: str = "seed-session"
+    created_by: str = "seed"
+
+
+@dataclass
 class Scenario:
     """A single test scenario: inject, wait, assert."""
 
@@ -60,6 +82,8 @@ class Scenario:
     inject: list[Injection]
     wait: WaitCondition
     assertions: list[Assertion]
+    seed_data: list[SeedFile] = field(default_factory=list)
+    seed_requests: list[SeedRequest] = field(default_factory=list)
 
 
 @dataclass
@@ -175,6 +199,32 @@ def _parse_assertion(raw: dict) -> Assertion:
     )
 
 
+def _parse_seed_data(raw: list[dict] | None) -> list[SeedFile]:
+    """Parse seed_data field from YAML."""
+    if not raw:
+        return []
+    return [SeedFile(path=item["path"], content=item["content"]) for item in raw]
+
+
+def _parse_seed_requests(raw: list[dict] | None) -> list[SeedRequest]:
+    """Parse seed_requests field from YAML."""
+    if not raw:
+        return []
+    return [
+        SeedRequest(
+            type=item["type"],
+            summary=item["summary"],
+            detail=item.get("detail", ""),
+            options=item.get("options"),
+            default=item.get("default"),
+            timeout_hours=item.get("timeout_hours"),
+            session_id=item.get("session_id", "seed-session"),
+            created_by=item.get("created_by", "seed"),
+        )
+        for item in raw
+    ]
+
+
 def _parse_scenario(raw: dict) -> Scenario:
     """Parse a single scenario from YAML."""
     return Scenario(
@@ -182,6 +232,8 @@ def _parse_scenario(raw: dict) -> Scenario:
         inject=_parse_injection(raw["inject"]),
         wait=_parse_wait(raw["wait"]),
         assertions=[_parse_assertion(a) for a in raw.get("assertions", [])],
+        seed_data=_parse_seed_data(raw.get("seed_data")),
+        seed_requests=_parse_seed_requests(raw.get("seed_requests")),
     )
 
 

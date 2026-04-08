@@ -1,6 +1,6 @@
 name: reviewer
 adapter_type: claude-code
 config:
-  model: opus
+  model: sonnet
   system_prompt_path: adapters/claude-code/prompts/reviewer.md
   skills: [cambium-api, cambium-self-improvement]

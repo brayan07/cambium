@@ -25,7 +25,10 @@ from cambium.models.skill import SkillRegistry
 from cambium.queue.sqlite import SQLiteQueue
 from cambium.runner.routine_runner import RoutineRunner
 from cambium.server.auth import authenticate, verify_session_token
+from cambium.request.service import RequestService
+from cambium.request.store import RequestStore
 from cambium.server import episodes as episodes_module
+from cambium.server import requests as requests_module
 from cambium.server import sessions as sessions_module
 from cambium.server import work_items as work_items_module
 from cambium.session.broadcaster import BroadcasterRegistry
@@ -80,12 +83,14 @@ class CambiumServer:
         routine_runner: RoutineRunner,
         consumer: ConsumerLoop,
         timer_loop: TimerLoop | None = None,
+        request_service: RequestService | None = None,
     ) -> None:
         self.queue = queue
         self.routine_registry = routine_registry
         self.routine_runner = routine_runner
         self.consumer = consumer
         self.timer_loop = timer_loop
+        self.request_service = request_service
         self._consumer_task: asyncio.Task | None = None
         self._timer_task: asyncio.Task | None = None
 
@@ -220,7 +225,7 @@ def build_server(
     mcp_registry = FileRegistry(config_dir / "mcp-servers.json")
 
     # Adapter types — pass config_dir so prompts resolve correctly
-    claude_adapter = ClaudeCodeAdapter(skill_registry, user_dir=config_dir, mcp_registry=mcp_registry)
+    claude_adapter = ClaudeCodeAdapter(skill_registry, user_dir=config_dir, mcp_registry=mcp_registry, data_dir=data_dir)
     adapter_types = {claude_adapter.name: claude_adapter}
 
     # Routine registry
@@ -253,11 +258,22 @@ def build_server(
     work_item_store = WorkItemStore(wi_db_path)
     work_item_service = WorkItemService(store=work_item_store, queue=queue)
 
+    # Request store + service (separate DB)
+    if db_path == ":memory:":
+        req_db_path = ":memory:"
+    else:
+        req_db_path = str(Path(db_path).parent / "requests.db")
+    request_store = RequestStore(req_db_path)
+    request_service = RequestService(store=request_store, queue=queue)
+
     # Configure episode endpoints
     episodes_module.configure(episode_store=episode_store)
 
     # Configure work item endpoints
     work_items_module.configure(service=work_item_service)
+
+    # Configure request endpoints
+    requests_module.configure(service=request_service)
 
     # Configure session endpoints
     sessions_module.configure(
@@ -275,6 +291,8 @@ def build_server(
         broadcaster_registry=broadcaster_registry,
         poll_interval=poll_interval,
         live=live,
+        request_service=request_service,
+        session_store=session_store,
     )
 
     # Set module-level episode store for publish endpoint event recording
@@ -305,6 +323,7 @@ def build_server(
         routine_runner=routine_runner,
         consumer=consumer,
         timer_loop=timer_loop,
+        request_service=request_service,
     )
 
 
@@ -328,6 +347,7 @@ app = FastAPI(
 )
 
 app.include_router(episodes_module.router)
+app.include_router(requests_module.router)
 app.include_router(sessions_module.router)
 app.include_router(work_items_module.router)
 

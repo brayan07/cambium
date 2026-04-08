@@ -1,0 +1,115 @@
+# Eval: Consolidator creates attention budget belief from request history.
+#
+# Strategy: Pre-seed session digests that reference request response patterns,
+# then trigger a consolidator weekly window. The consolidator should analyze
+# the patterns and create an attention-budget.md belief file.
+#
+# Cost: ~$0.50 per trial (consolidator only)
+name: attention-budget-creation
+trials: 3
+timeout: 300
+
+config_override:
+  adapters/claude-code/instances/memory-consolidator.yaml:
+    config:
+      model: sonnet
+
+scenarios:
+  - name: consolidator-creates-attention-budget
+    seed_data:
+      - path: memory/sessions/2026-04-01-session-a.md
+        content: |
+          ---
+          title: "Research session — API design patterns"
+          routine: session-summarizer
+          instance: executor
+          session_id: eval-budget-001
+          started: 2026-04-01T10:00:00Z
+          ended: 2026-04-01T10:45:00Z
+          ---
+
+          ## Summary
+
+          Executor researched API design patterns for the new service layer.
+          Created a permission request to merge the resulting PR, which the user
+          answered within 2 hours.
+
+          ## Notes
+
+          Permission request for PR merge was answered quickly.
+
+          ## Preference Signals
+
+          None detected
+
+      - path: memory/sessions/2026-04-02-session-b.md
+        content: |
+          ---
+          title: "Implementation session — rate limiter"
+          routine: session-summarizer
+          instance: executor
+          session_id: eval-budget-002
+          started: 2026-04-02T14:00:00Z
+          ended: 2026-04-02T15:30:00Z
+          ---
+
+          ## Summary
+
+          Executor implemented the rate limiter module. Created two requests:
+          a permission request to deploy (answered in 1 hour) and a preference
+          request about logging format (expired after 48 hours — user did not
+          respond, default was applied).
+
+          ## Notes
+
+          User responds quickly to permission requests but preference requests
+          tend to expire. Pattern consistent with previous weeks.
+
+          ## Preference Signals
+
+          None detected
+
+      - path: memory/sessions/2026-04-03-session-c.md
+        content: |
+          ---
+          title: "Review session — documentation update"
+          routine: session-summarizer
+          instance: executor
+          session_id: eval-budget-003
+          started: 2026-04-03T09:00:00Z
+          ended: 2026-04-03T09:20:00Z
+          ---
+
+          ## Summary
+
+          Executor updated documentation. Three preference requests were created
+          this week; two expired and one was answered. User appears to handle
+          about 4-5 requests per day comfortably.
+
+          ## Notes
+
+          Consistent pattern: permission requests answered within 1-3 hours,
+          preference requests frequently expire.
+
+          ## Preference Signals
+
+          None detected
+
+    inject:
+      - channel: heartbeat
+        payload:
+          window: weekly
+          target: memory-consolidator
+
+    wait:
+      routine_completed: memory-consolidator
+
+    assertions:
+      - type: episode
+        routine: memory-consolidator
+        status: completed
+      - type: memory_committed
+      - type: deterministic
+        path: defaults/evals/scripts/check-attention-budget.sh
+        threshold: 0.5
+      - type: no_errors

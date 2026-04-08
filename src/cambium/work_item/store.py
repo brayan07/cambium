@@ -41,6 +41,7 @@ class WorkItemStore:
                 context TEXT NOT NULL DEFAULT '{}',
                 result TEXT,
                 actor TEXT,
+                assigned_to TEXT,
                 session_id TEXT,
                 max_attempts INTEGER NOT NULL DEFAULT 3,
                 attempt_count INTEGER NOT NULL DEFAULT 0,
@@ -122,13 +123,14 @@ class WorkItemStore:
             context=json.loads(row[9]),
             result=row[10],
             actor=row[11],
-            session_id=row[12],
-            max_attempts=row[13],
-            attempt_count=row[14],
-            reviewed_by=row[15],
-            reviewed_at=row[16],
-            created_at=row[17],
-            updated_at=row[18],
+            assigned_to=row[12],
+            session_id=row[13],
+            max_attempts=row[14],
+            attempt_count=row[15],
+            reviewed_by=row[16],
+            reviewed_at=row[17],
+            created_at=row[18],
+            updated_at=row[19],
         )
 
     def _row_to_event(self, row: tuple) -> WorkItemEvent:
@@ -145,7 +147,7 @@ class WorkItemStore:
     _ITEM_COLS = (
         "id, title, description, status, parent_id, priority, "
         "completion_mode, rollup_mode, depends_on, context, result, "
-        "actor, session_id, max_attempts, attempt_count, "
+        "actor, assigned_to, session_id, max_attempts, attempt_count, "
         "reviewed_by, reviewed_at, created_at, updated_at"
     )
 
@@ -158,7 +160,7 @@ class WorkItemStore:
         try:
             cur.execute(
                 f"INSERT INTO work_items ({self._ITEM_COLS}) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 self._item_to_params(item),
             )
             self._emit_event(
@@ -188,6 +190,7 @@ class WorkItemStore:
             json.dumps(item.context),
             item.result,
             item.actor,
+            item.assigned_to,
             item.session_id,
             item.max_attempts,
             item.attempt_count,
@@ -247,6 +250,7 @@ class WorkItemStore:
         self,
         status: WorkItemStatus | None = None,
         parent_id: str | None = None,
+        assigned_to: str | None = None,
         limit: int = 200,
     ) -> tuple[list[WorkItem], int]:
         """Return (items, total_count) — total is the untruncated count."""
@@ -259,6 +263,9 @@ class WorkItemStore:
         if parent_id is not None:
             conditions.append("parent_id = ?")
             params.append(parent_id)
+        if assigned_to is not None:
+            conditions.append("assigned_to = ?")
+            params.append(assigned_to)
         if conditions:
             where = " WHERE " + " AND ".join(conditions)
 
@@ -600,7 +607,7 @@ class WorkItemStore:
                 child.parent_id = parent_id
                 cur.execute(
                     f"INSERT INTO work_items ({self._ITEM_COLS}) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     self._item_to_params(child),
                 )
                 self._emit_event(

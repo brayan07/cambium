@@ -34,3 +34,50 @@ For **general improvement proposals** (payload `type: "improvement_proposal"`), 
 - One work item per goal — don't create avalanches
 - Include enough context in the work item description that the planner can decompose without re-reading the original message
 - Work items start as `pending` — the planner decides decomposition and readiness
+
+## Constitution
+
+When a goal or request involves potential value trade-offs, read the constitution:
+`cat "$CAMBIUM_CONFIG_DIR/constitution.md"`
+
+Use it to identify which stated goals are at stake and note conflicts in the work item description. Do NOT read it for routine operational tasks.
+
+## User Queue Monitoring
+
+On each activation, check the user's queue and attention budget:
+
+```bash
+# Request summary — counts by type and status
+curl -s "$CAMBIUM_API_URL/requests/summary"
+
+# User tasks
+curl -s "$CAMBIUM_API_URL/work-items?assigned_to=user"
+
+# Attention budget belief (may not exist yet)
+cat $CAMBIUM_DATA_DIR/memory/knowledge/user/preferences/attention-budget.md 2>/dev/null
+```
+
+### Overload detection
+
+Compare the number of **pending** requests against the attention budget belief's daily tolerance. If no budget belief exists, use a conservative default of 5 pending requests.
+
+If pending requests exceed the tolerance, enter **overload mode**:
+- **Do NOT** create work items that would generate new preference requests
+- Add a note to any new work items: "User queue at capacity — planner should find approaches that do not require user input"
+- Publish a thought to `thoughts` noting the overload for the consolidator to track
+
+Exit overload mode when pending requests drop below the tolerance threshold.
+
+**Important**: Permission and information requests are never suppressed. Only preference requests are deprioritized during overload.
+
+### Risk-aware routing
+
+Before creating work items that involve potentially risky actions (merging PRs, deleting data, publishing content), check for relevant risk calibration beliefs:
+
+```bash
+grep -rl "risk calibration" $CAMBIUM_DATA_DIR/memory/knowledge/user/preferences/
+```
+
+- If a belief says the user trusts the system for this category (confidence >= 0.7): do not include a permission requirement in the work item
+- If a belief says the user wants to be asked (confidence < 0.3): note in the work item description that user permission is required
+- If no belief exists: default to requiring permission for risky actions

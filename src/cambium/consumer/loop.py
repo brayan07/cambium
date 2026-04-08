@@ -12,8 +12,10 @@ from cambium.adapters.base import RunResult
 from cambium.models.message import Message
 from cambium.models.routine import Routine, RoutineRegistry
 from cambium.queue.base import QueueAdapter
+from cambium.request.service import RequestService
 from cambium.runner.routine_runner import RoutineRunner
 from cambium.session.broadcaster import BroadcasterRegistry
+from cambium.session.store import SessionStore
 
 log = logging.getLogger(__name__)
 
@@ -33,6 +35,8 @@ class ConsumerLoop:
         poll_interval: float = 2.0,
         live: bool = False,
         max_workers: int = _DEFAULT_MAX_WORKERS,
+        request_service: RequestService | None = None,
+        session_store: SessionStore | None = None,
     ) -> None:
         self.queue = queue
         self.routine_registry = routine_registry
@@ -41,6 +45,9 @@ class ConsumerLoop:
         self.poll_interval = poll_interval
         self.live = live
         self._executor = ThreadPoolExecutor(max_workers=max_workers)
+        self.request_service = request_service
+        self.session_store = session_store
+        self._last_expiry_sweep: float = 0.0
 
         # Per-routine concurrency tracking
         self._running: dict[str, int] = {}  # routine_name -> active session count
@@ -201,15 +208,101 @@ class ConsumerLoop:
                 broadcaster.close()
                 self.broadcaster_registry.remove(session_id)
 
+    # --- Resume and expiry ---
+
+    def _handle_resume(self, message: Message) -> RunResult:
+        """Handle a resume message by reopening the originating session."""
+        try:
+            request_id = message.payload.get("user_response")
+            if not request_id:
+                log.warning("Resume message missing user_response payload")
+                return RunResult(success=False, output="", error="Missing user_response")
+
+            request = self.request_service.get_request(request_id)
+            if request is None:
+                log.warning("Resume: request %s not found", request_id[:8])
+                return RunResult(success=False, output="", error=f"Request {request_id} not found")
+
+            from cambium.request.model import RequestStatus
+            if request.status != RequestStatus.ANSWERED:
+                log.warning("Resume: request %s not answered (status=%s)", request_id[:8], request.status.value)
+                return RunResult(success=False, output="", error=f"Request not answered")
+
+            if self.session_store is None:
+                log.error("Resume: session_store not configured")
+                return RunResult(success=False, output="", error="No session store")
+
+            session = self.session_store.get_session(request.session_id)
+            if session is None:
+                log.warning("Resume: session %s not found", request.session_id[:8])
+                return RunResult(success=False, output="", error=f"Session not found")
+
+            routine = self.routine_registry.get(session.routine_name)
+            if routine is None:
+                log.warning("Resume: routine '%s' not found", session.routine_name)
+                return RunResult(success=False, output="", error=f"Routine not found")
+
+            user_message = f"[User response to '{request.summary}']: {request.answer}"
+
+            log.info(
+                "Resuming session %s (routine=%s) with answer to request %s",
+                request.session_id[:8], session.routine_name, request_id[:8],
+            )
+
+            result = self.routine_runner.send_message(
+                routine,
+                session_id=request.session_id,
+                user_message=user_message,
+                live=self.live,
+            )
+
+            # Emit completion event
+            if not routine.suppress_completion_event:
+                self.queue.publish(Message.create(
+                    channel="sessions_completed",
+                    payload={
+                        "session_id": request.session_id,
+                        "routine_name": routine.name,
+                        "success": result.success,
+                        "trigger_channel": "resume",
+                    },
+                    source="system",
+                ))
+
+            return result
+        except Exception as exc:
+            log.exception("Error handling resume message")
+            return RunResult(success=False, output="", error=str(exc))
+
+    def _sweep_expired_requests(self) -> None:
+        """Expire overdue preference requests. Throttled to once per minute."""
+        if self.request_service is None:
+            return
+        now = time.monotonic()
+        if now - self._last_expiry_sweep < 60:
+            return
+        self._last_expiry_sweep = now
+        try:
+            count = self.request_service.store.expire_overdue()
+            if count:
+                log.info("Expired %d overdue preference request(s)", count)
+        except Exception:
+            log.exception("Error sweeping expired requests")
+
     # --- Main loop ---
 
     def tick(self) -> list[RunResult]:
         """One iteration: consume messages, dispatch to routines concurrently."""
+        # 0. Sweep expired preference requests (throttled to once per minute)
+        self._sweep_expired_requests()
+
         # 1. Flush any expired batch buffers
         batch_futures = self._flush_expired_batches()
 
-        # 2. Consume messages
+        # 2. Consume messages (include system-level 'resume' channel)
         channels = self.routine_registry.subscribed_channels()
+        if self.request_service is not None:
+            channels = list(set(channels) | {"resume"})
         if not channels:
             return []
 
@@ -219,6 +312,12 @@ class ConsumerLoop:
         message_futures: list[tuple[Message, list[Future]]] = []
 
         for message in messages:
+            # System-level resume channel — bypass normal routine dispatch
+            if message.channel == "resume" and self.request_service is not None:
+                future = self._executor.submit(self._handle_resume, message)
+                message_futures.append((message, [future]))
+                continue
+
             routines = self.routine_registry.for_channel(message.channel)
 
             # Target filtering — heartbeat timers specify which routine to wake

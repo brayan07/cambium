@@ -4,10 +4,10 @@ timers:
     schedule: "*/5 * * * *"
     payload: { window: micro, target: sentry }
 
-  - name: consolidator-hourly
+  - name: consolidator-scan
     channel: heartbeat
-    schedule: "0 * * * *"
-    payload: { window: hourly, target: memory-consolidator }
+    schedule: "*/15 * * * *"
+    payload: { window: scan, target: memory-consolidator }
 
   - name: consolidator-daily
     channel: heartbeat

@@ -35,10 +35,12 @@ class ClaudeCodeAdapter(AdapterType):
         skill_registry: SkillRegistry,
         user_dir: Path | None = None,
         mcp_registry: MCPRegistry | None = None,
+        data_dir: Path | None = None,
     ) -> None:
         self.skill_registry = skill_registry
         self.user_dir = user_dir
         self.mcp_registry = mcp_registry
+        self.data_dir = data_dir
 
     def send_message(
         self,
@@ -128,6 +130,10 @@ class ClaudeCodeAdapter(AdapterType):
             env = os.environ.copy()
             env["CAMBIUM_TOKEN"] = session_token
             env["CAMBIUM_API_URL"] = api_base_url
+            if self.user_dir:
+                env["CAMBIUM_CONFIG_DIR"] = str(self.user_dir)
+            if self.data_dir:
+                env["CAMBIUM_DATA_DIR"] = str(self.data_dir)
 
             log.info(
                 f"{'Resuming' if resume else 'Starting'} session '{session_id[:8]}' "
@@ -288,6 +294,7 @@ class ClaudeCodeAdapter(AdapterType):
 
     def attach(
         self, instance: AdapterInstance, session_id: str, cwd: Path | None = None,
+        initial_message: str | None = None,
     ) -> None:
         """Attach to a Claude Code session.
 
@@ -328,6 +335,13 @@ class ClaudeCodeAdapter(AdapterType):
             f"instance='{instance.name}' model={model}"
         )
 
+        if initial_message:
+            cmd.append(initial_message)
+
+        if self.user_dir:
+            os.environ["CAMBIUM_CONFIG_DIR"] = str(self.user_dir)
+        if self.data_dir:
+            os.environ["CAMBIUM_DATA_DIR"] = str(self.data_dir)
         if cwd:
             os.chdir(cwd)
         os.execvp("claude", cmd)

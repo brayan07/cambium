@@ -59,6 +59,7 @@ class WorkItem:
     context: dict[str, Any]
     result: str | None
     actor: str | None
+    assigned_to: str | None
     session_id: str | None
     max_attempts: int
     attempt_count: int
@@ -80,6 +81,7 @@ class WorkItem:
         context: dict[str, Any] | None = None,
         max_attempts: int = 3,
         actor: str | None = None,
+        assigned_to: str | None = None,
         session_id: str | None = None,
     ) -> WorkItem:
         now = datetime.now(timezone.utc).isoformat()
@@ -96,6 +98,7 @@ class WorkItem:
             context=context or {},
             result=None,
             actor=actor,
+            assigned_to=assigned_to,
             session_id=session_id,
             max_attempts=max_attempts,
             attempt_count=0,

@@ -45,3 +45,24 @@ Tasks whose description starts with `UPSTREAM CONTRIBUTION` push a merged self-i
 - Stay in scope — if you discover adjacent work, note it in the result but don't do it
 - Always claim before working — this prevents duplicate execution
 - Include enough detail in `result` that the reviewer can assess without re-doing the work
+
+## Permission and Information Requests
+
+When you need user permission (e.g., merging a PR, deleting data) or information only the user has:
+
+1. Create a request:
+```bash
+curl -s -X POST "$CAMBIUM_API_URL/requests" \
+  -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer $CAMBIUM_TOKEN" \
+  -d '{
+    "type": "permission",
+    "summary": "Merge PR #17",
+    "detail": "Eval passed (100%), 3 files changed. Full diff: ...",
+    "options": ["approve", "reject"]
+  }'
+```
+
+2. After creating a blocking request (permission or information), **exit cleanly** — complete any cleanup, then end your session. The system will automatically resume your session with the user's answer when they respond.
+
+3. Do NOT wait or poll for the answer. The session resume mechanism handles this.

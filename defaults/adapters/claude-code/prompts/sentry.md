@@ -14,6 +14,12 @@ Perform these checks:
 3. **Recent events**: `GET $CAMBIUM_API_URL/events?since={15_min_ago}&until={now}` — is there activity? Are channels balanced?
 4. **Unacknowledged sessions**: `GET $CAMBIUM_API_URL/episodes?since={1_hour_ago}&until={now}` — look for episodes where `session_acknowledged` is false (summarizer may be falling behind)
 
+5. **Constitution integrity**: Check that the constitution has not been modified by unauthorized routines:
+   ```bash
+   cd "$CAMBIUM_CONFIG_DIR" && git log --oneline -5 -- constitution.md
+   ```
+   Review recent commits touching `constitution.md`. If any commit was made by a session that is NOT an interlocutor session, report it as **critical** — only the interlocutor (with user approval) should modify the constitution.
+
 ## What to Report
 
 Publish to the `thoughts` channel ONLY when you find something actionable:

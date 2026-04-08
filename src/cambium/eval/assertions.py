@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import subprocess
 import sys
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from cambium.eval.model import Assertion, AssertionResult
@@ -237,14 +238,47 @@ def assert_deterministic(ctx: StagingContext, a: Assertion) -> AssertionResult:
             assertion=a, passed=False, detail="No script path specified",
         )
     try:
+        import os
+        # Resolve script path relative to the worktree (config override repo) or
+        # fall back to the original repo dir.  The staging context carries the
+        # worktree_dir when config overrides created one.
+        script_path = Path(a.path)
+        if not script_path.is_absolute():
+            # Try the working directory first (original repo), then the worktree.
+            # Worktrees may not have uncommitted files like new eval scripts.
+            for base in [Path.cwd(), ctx.worktree_dir]:
+                if base and (base / script_path).exists():
+                    script_path = base / script_path
+                    break
+            else:
+                return AssertionResult(
+                    assertion=a, passed=False,
+                    detail=f"Script not found: {a.path} (tried cwd={Path.cwd()}, "
+                           f"worktree={ctx.worktree_dir})",
+                )
+        # Inherit PATH so the script can find system commands (find, grep, etc.)
+        env = {
+            "STAGING_API_URL": ctx.api_url,
+            "STAGING_DATA_DIR": str(ctx.data_dir),
+            "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
+            "HOME": os.environ.get("HOME", "/tmp"),
+        }
         result = subprocess.run(
-            ["bash", a.path],
+            ["bash", str(script_path)],
             capture_output=True, timeout=60,
             cwd=str(ctx.data_dir),
-            env={"STAGING_API_URL": ctx.api_url, "STAGING_DATA_DIR": str(ctx.data_dir)},
+            env=env,
         )
         import json
-        data = json.loads(result.stdout.decode())
+        stdout = result.stdout.decode().strip()
+        stderr = result.stderr.decode().strip()
+        if not stdout:
+            return AssertionResult(
+                assertion=a, passed=False,
+                detail=f"Script produced no output. stderr: {stderr[:500]}. "
+                       f"path: {script_path}, rc: {result.returncode}",
+            )
+        data = json.loads(stdout)
         score = float(data.get("score", 0))
         detail = data.get("details", "")
         threshold = a.threshold or 0.5

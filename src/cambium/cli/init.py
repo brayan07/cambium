@@ -34,7 +34,12 @@ dist/
 node_modules/
 """
 
-_CONSTITUTION = "# Constitution\n\nDefine your values, goals, and priorities here.\n"
+def _get_constitution_template() -> str:
+    """Read the constitution template from defaults, with a fallback stub."""
+    template = _get_defaults_dir() / "constitution-template.md"
+    if template.exists():
+        return template.read_text()
+    return "# Constitution\n\nDefine your values, goals, and priorities here.\n"
 
 _DATA_DIRS = ("memory", "sessions", "logs")
 
@@ -158,7 +163,7 @@ def _init_combined(root: Path, framework_dir: Path) -> None:
     # Ensure constitution exists at the config level
     config_dir = root / "defaults"
     if config_dir.is_dir():
-        _write_if_missing(config_dir / "constitution.md", _CONSTITUTION)
+        _write_if_missing(config_dir / "constitution.md", _get_constitution_template())
 
     # Ensure .gitignore
     _write_if_missing(root / ".gitignore", _GITIGNORE)
@@ -184,7 +189,7 @@ def _init_legacy(root: Path, defaults_dir: Path) -> None:
         root / "config.yaml",
         yaml.dump(_DEFAULT_CONFIG, default_flow_style=False),
     )
-    _write_if_missing(root / "constitution.md", _CONSTITUTION)
+    _write_if_missing(root / "constitution.md", _get_constitution_template())
     _write_if_missing(root / ".gitignore", "data/\n__pycache__/\n*.pyc\n")
 
     # Copy defaults tree

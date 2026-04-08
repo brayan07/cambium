@@ -60,39 +60,46 @@ def cmd_chat(args: argparse.Namespace) -> None:
 
     from cambium.adapters.base import AdapterInstanceRegistry
     from cambium.models.routine import RoutineRegistry
+    from cambium.server.app import _resolve_config_dir
 
-    user_dir = Path.home() / ".cambium"
+    # Resolve directories — same logic as the server command
+    repo_dir = Path(args.repo_dir) if args.repo_dir else Path.cwd()
+    data_dir = Path(args.data_dir) if args.data_dir else Path.home() / ".cambium"
+    config_dir = _resolve_config_dir(repo_dir)
 
     # Load routine
-    routine_reg = RoutineRegistry(user_dir / "routines")
+    routine_reg = RoutineRegistry(*[d for d in [config_dir / "routines"] if d.exists()])
 
     routine = routine_reg.get(args.routine)
     if routine is None:
-        print(f"Error: routine '{args.routine}' not found", file=sys.stderr)
+        print(f"Error: routine '{args.routine}' not found in {config_dir / 'routines'}", file=sys.stderr)
         sys.exit(1)
 
     # Load adapter instance
-    instance_reg = AdapterInstanceRegistry(user_dir / "adapters" / "claude-code" / "instances")
+    instance_dirs = [config_dir / "adapters" / "claude-code" / "instances"]
+    instance_reg = AdapterInstanceRegistry(*[d for d in instance_dirs if d.exists()])
 
     instance = instance_reg.get(routine.adapter_instance)
     if instance is None:
         print(f"Error: adapter instance '{routine.adapter_instance}' not found", file=sys.stderr)
         sys.exit(1)
 
-    # Resolve adapter type
-    adapter_types = _build_adapter_types(user_dir)
+    # Resolve adapter type (skills and prompts resolve relative to config_dir)
+    adapter_types = _build_adapter_types(config_dir, data_dir=data_dir)
     adapter = adapter_types.get(instance.adapter_type)
     if adapter is None:
         print(f"Error: adapter type '{instance.adapter_type}' not found", file=sys.stderr)
         sys.exit(1)
 
     session_id = str(uuid.uuid4())
-    session_dir = user_dir / "data" / "sessions" / session_id
+    session_dir = data_dir / "data" / "sessions" / session_id
     session_dir.mkdir(parents=True, exist_ok=True)
-    print(f"Starting chat (routine: {args.routine}, adapter: {instance.adapter_type}, session: {session_id[:8]})")
+    print(f"Starting chat (routine: {args.routine}, config: {config_dir}, session: {session_id[:8]})")
+
+    initial_message = args.message if args.message else "Session started."
 
     try:
-        adapter.attach(instance, session_id, cwd=session_dir)
+        adapter.attach(instance, session_id, cwd=session_dir, initial_message=initial_message)
     except NotImplementedError as e:
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
@@ -155,7 +162,7 @@ def cmd_eval(args: argparse.Namespace) -> None:
         sys.exit(1)
 
 
-def _build_adapter_types(user_dir):
+def _build_adapter_types(user_dir, data_dir=None):
     """Build the registry of adapter types from the user directory."""
     from cambium.adapters.claude_code import ClaudeCodeAdapter
     from cambium.mcp.file_registry import FileRegistry
@@ -166,7 +173,7 @@ def _build_adapter_types(user_dir):
 
     mcp_registry = FileRegistry(user_dir / "mcp-servers.json")
 
-    claude_adapter = ClaudeCodeAdapter(skill_registry, user_dir=user_dir, mcp_registry=mcp_registry)
+    claude_adapter = ClaudeCodeAdapter(skill_registry, user_dir=user_dir, mcp_registry=mcp_registry, data_dir=data_dir)
     return {claude_adapter.name: claude_adapter}
 
 
@@ -199,7 +206,10 @@ def main() -> None:
 
     # chat
     chat = sub.add_parser("chat", help="Attach to a live session via Claude CLI")
-    chat.add_argument("routine", help="Routine name (e.g. interactive)")
+    chat.add_argument("routine", help="Routine name (e.g. interlocutor)")
+    chat.add_argument("--repo-dir", help="Directory with code and configs (default: cwd)")
+    chat.add_argument("--data-dir", help="Directory for runtime state (default: ~/.cambium)")
+    chat.add_argument("-m", "--message", help="Initial message (default: 'Session started.')")
 
     # eval
     eval_parser = sub.add_parser("eval", help="Run evaluations against a staging instance")

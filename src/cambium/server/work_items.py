@@ -29,6 +29,7 @@ class CreateWorkItemRequest(BaseModel):
     depends_on: list[str] = Field(default_factory=list)
     context: dict[str, Any] = Field(default_factory=dict)
     max_attempts: int = 3
+    assigned_to: str | None = None
 
 
 class ChildSpec(BaseModel):
@@ -38,6 +39,7 @@ class ChildSpec(BaseModel):
     depends_on: list[str] = Field(default_factory=list)
     context: dict[str, Any] = Field(default_factory=dict)
     max_attempts: int = 3
+    assigned_to: str | None = None
 
 
 class DecomposeRequest(BaseModel):
@@ -74,6 +76,7 @@ class WorkItemResponse(BaseModel):
     context: dict[str, Any]
     result: str | None
     actor: str | None
+    assigned_to: str | None
     session_id: str | None
     max_attempts: int
     attempt_count: int
@@ -147,6 +150,7 @@ def _item_to_response(item) -> WorkItemResponse:
         context=item.context,
         result=item.result,
         actor=item.actor,
+        assigned_to=item.assigned_to,
         session_id=item.session_id,
         max_attempts=item.max_attempts,
         attempt_count=item.attempt_count,
@@ -190,6 +194,7 @@ def create_work_item(
         context=body.context,
         max_attempts=body.max_attempts,
         actor=actor,
+        assigned_to=body.assigned_to,
         session_id=session_id,
     )
     return _item_to_response(item)
@@ -378,12 +383,13 @@ def get_tree(item_id: str):
 def list_work_items(
     status: str | None = None,
     parent_id: str | None = None,
+    assigned_to: str | None = None,
     limit: int = 200,
 ):
     service = _get_service()
     status_filter = WorkItemStatus(status) if status else None
     items, total = service.store.list_items(
-        status=status_filter, parent_id=parent_id, limit=limit
+        status=status_filter, parent_id=parent_id, assigned_to=assigned_to, limit=limit
     )
     return ListWorkItemsResponse(
         items=[_item_to_response(i) for i in items],
