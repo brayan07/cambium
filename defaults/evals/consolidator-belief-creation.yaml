@@ -1,65 +1,73 @@
 # Eval: Memory consolidator creates preference belief files from digest signals.
 #
-# Strategy: Run a cascade to generate sessions with preference signals, wait for
-# the summarizer to write digests, then trigger a consolidator scan via heartbeat.
-# Wait for the consolidator to complete, then check for preference belief files.
+# Strategy: Pre-seed a session digest containing preference signals into the
+# staging data dir, then trigger a consolidator scan via heartbeat.  The
+# consolidator should read the digest, detect the signals, and create belief
+# files in knowledge/user/preferences/.
 #
-# The heartbeat injection has a delay to let the cascade + summarizer run first.
-# We wait for routine_completed: memory-consolidator (not cascade_settled).
+# This is a focused test of the consolidator's preference belief management —
+# the signal-detection eval already covers the summarizer producing signals.
 #
-# Cost: ~$1-2 per trial
+# Cost: ~$0.50 per trial (consolidator only, no full cascade)
 name: consolidator-belief-creation
 trials: 3
-timeout: 600
+timeout: 300
 
 config_override:
-  adapters/claude-code/instances/coordinator.yaml:
-    config:
-      model: sonnet
-  adapters/claude-code/instances/planner.yaml:
-    config:
-      model: sonnet
-  adapters/claude-code/instances/executor.yaml:
-    config:
-      model: sonnet
-  adapters/claude-code/instances/reviewer.yaml:
-    config:
-      model: sonnet
-  adapters/claude-code/instances/session-summarizer.yaml:
-    config:
-      model: sonnet
-  adapters/claude-code/instances/sentry.yaml:
-    config:
-      model: sonnet
   adapters/claude-code/instances/memory-consolidator.yaml:
     config:
       model: sonnet
 
 scenarios:
-  - name: full-pipeline-preference-to-belief
+  - name: consolidator-creates-beliefs-from-seeded-digest
+    seed_data:
+      - path: memory/sessions/2026-04-08-eval-session.md
+        content: |
+          ---
+          title: "Eval session — API rate limiting research"
+          routine: session-summarizer
+          instance: executor
+          session_id: eval-session-001
+          started: 2026-04-08T12:00:00Z
+          ended: 2026-04-08T12:35:00Z
+          ---
+
+          ## Summary
+
+          User requested research on API rate limiting best practices.  During the
+          session, the user explicitly stated a formatting preference and corrected
+          the executor's initial approach.
+
+          ## Key Decisions
+
+          - User chose token-bucket over leaky-bucket for the rate limiter design
+          - User corrected output format: wants structured markdown, not prose
+
+          ## Notes
+
+          User was emphatic about output formatting — this appears to be a standing
+          preference, not a one-time request.
+
+          ## Preference Signals
+
+          - **Explicit correction (confidence: explicit):** User said "I always want
+            research output as a structured markdown document with sections for
+            findings, confidence levels, and open questions. Never give me a wall
+            of text."
+          - **Implicit pattern (confidence: implicit):** User consistently chose
+            token-bucket over alternatives in two separate discussions, suggesting
+            a preference for rate-limiting approaches with burst tolerance.
+
     inject:
-      - channel: external_events
-        payload:
-          goal: >
-            User said: 'I always want research output as a structured markdown
-            document with sections for findings, confidence levels, and open
-            questions. Never give me a wall of text.' Research best practices
-            for API rate limiting.
-      # Trigger consolidator scan after a delay to let the cascade + summarizer run
       - channel: heartbeat
         payload:
           window: scan
           target: memory-consolidator
-        delay: 90
+
     wait:
       routine_completed: memory-consolidator
+
     assertions:
-      - type: episode
-        routine: coordinator
-        status: completed
-      - type: episode
-        routine: session-summarizer
-        status: completed
       - type: episode
         routine: memory-consolidator
         status: completed

@@ -53,6 +53,14 @@ class Assertion:
 
 
 @dataclass
+class SeedFile:
+    """A file to pre-seed into the staging data dir before the eval runs."""
+
+    path: str  # relative to data_dir (e.g., "memory/sessions/2026-04-08-test.md")
+    content: str
+
+
+@dataclass
 class Scenario:
     """A single test scenario: inject, wait, assert."""
 
@@ -60,6 +68,7 @@ class Scenario:
     inject: list[Injection]
     wait: WaitCondition
     assertions: list[Assertion]
+    seed_data: list[SeedFile] = field(default_factory=list)
 
 
 @dataclass
@@ -175,6 +184,13 @@ def _parse_assertion(raw: dict) -> Assertion:
     )
 
 
+def _parse_seed_data(raw: list[dict] | None) -> list[SeedFile]:
+    """Parse seed_data field from YAML."""
+    if not raw:
+        return []
+    return [SeedFile(path=item["path"], content=item["content"]) for item in raw]
+
+
 def _parse_scenario(raw: dict) -> Scenario:
     """Parse a single scenario from YAML."""
     return Scenario(
@@ -182,6 +198,7 @@ def _parse_scenario(raw: dict) -> Scenario:
         inject=_parse_injection(raw["inject"]),
         wait=_parse_wait(raw["wait"]),
         assertions=[_parse_assertion(a) for a in raw.get("assertions", [])],
+        seed_data=_parse_seed_data(raw.get("seed_data")),
     )
 
 
