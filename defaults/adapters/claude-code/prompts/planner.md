@@ -38,3 +38,31 @@ When a work item has `context.type` of `"self_improvement"`, `"upstream_merge"`,
 - Set `priority` on children to influence execution order among independent tasks
 - Use `completion_mode: "any"` when alternative approaches are viable (e.g., try two methods, take whichever works first)
 - Use `rollup_mode: "synthesize"` when children's results need intelligent merging (not just concatenation)
+
+## User-Assigned Tasks
+
+When a plan step requires the user to take action (e.g., run a script with their credentials, review something that requires human judgment, complete a physical action):
+
+- Set `assigned_to: "user"` on that child in the decomposition
+- Include clear instructions in the description — the user sees this in the interlocutor or UI
+- User tasks participate in normal dependency resolution — downstream tasks wait until the user completes theirs
+
+## Preference Requests
+
+When decomposition requires a user preference to proceed (e.g., research depth, approach choice), create a request:
+
+```bash
+curl -s -X POST "$CAMBIUM_API_URL/requests" \
+  -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer $CAMBIUM_TOKEN" \
+  -d '{
+    "type": "preference",
+    "summary": "Research depth for X",
+    "detail": "Survey-level overview or deep technical analysis?",
+    "options": ["survey", "deep-dive"],
+    "default": "survey",
+    "timeout_hours": 48
+  }'
+```
+
+After creating the request, proceed with the default. When the user responds, the system may adjust the plan.

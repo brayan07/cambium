@@ -34,3 +34,13 @@ For **general improvement proposals** (payload `type: "improvement_proposal"`), 
 - One work item per goal — don't create avalanches
 - Include enough context in the work item description that the planner can decompose without re-reading the original message
 - Work items start as `pending` — the planner decides decomposition and readiness
+
+## User Queue Monitoring
+
+On each activation, check the user's queue:
+- `curl -s "$CAMBIUM_API_URL/requests/summary"` — pending request counts by type
+- `curl -s "$CAMBIUM_API_URL/work-items?assigned_to=user"` — tasks assigned to the user
+
+If the user appears overloaded (many pending requests or tasks), consider:
+- Publishing to `plans` requesting the planner find approaches that don't require user input
+- Noting the overload in a `thoughts` channel message for the consolidator

@@ -37,7 +37,8 @@ These are the channels in the system. Your routine can only publish to a subset 
 | `thoughts` | Observations about patterns and improvements |
 | `heartbeat` | Timer-driven wake-up signals for sentry and consolidator |
 | `sessions_completed` | Session lifecycle events (system-emitted) |
-| `input_needed` | Requests for user input (auto-persisted to central store) |
+| `input_needed` | Requests for user input — triggers notification in interlocutor |
+| `resume` | Session resume triggers (system-emitted when user answers a request) |
 
 ## Checking Your Permissions
 
@@ -133,6 +134,18 @@ curl -s -X POST "$CAMBIUM_API_URL/work-items" \
     "title": "Research Python testing frameworks",
     "description": "Compare pytest, unittest, and nose2 with recommendation",
     "priority": 5
+  }'
+```
+
+To assign a work item to the user:
+```bash
+curl -s -X POST "$CAMBIUM_API_URL/work-items" \
+  -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer $CAMBIUM_TOKEN" \
+  -d '{
+    "title": "Run setup_oauth.py (requires your credentials)",
+    "assigned_to": "user",
+    "context": {"delegation": true, "estimated_effort": "10 minutes"}
   }'
 ```
 
@@ -340,6 +353,83 @@ Library files are digested external content (books, papers, etc.). They are refe
 ### Session digests
 
 Session digests are written by the session-summarizer routine to `sessions/YYYY-MM-DD/{short-session-id}.md`. Each digest captures what happened, what was decided, and what was learned.
+
+## Requests (Human-in-the-Loop)
+
+Agent sessions can request user input via the requests API. There are three types:
+- **Permission**: Blocking — session waits for user approval (e.g., "Can I merge PR #17?")
+- **Information**: Blocking — session waits for user-provided data (e.g., "What's the API key?")
+- **Preference**: Non-blocking — session proceeds with default after timeout (e.g., "Survey or deep-dive?")
+
+### Creating a request
+
+```bash
+curl -s -X POST "$CAMBIUM_API_URL/requests" \
+  -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer $CAMBIUM_TOKEN" \
+  -d '{
+    "type": "permission",
+    "summary": "Merge self-improvement PR #17",
+    "detail": "Eval passed, 3 files changed.",
+    "options": ["approve", "reject"]
+  }'
+```
+
+For preference requests, include `default` and `timeout_hours`:
+```bash
+curl -s -X POST "$CAMBIUM_API_URL/requests" \
+  -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer $CAMBIUM_TOKEN" \
+  -d '{
+    "type": "preference",
+    "summary": "Research depth",
+    "detail": "Survey or deep-dive?",
+    "options": ["survey", "deep-dive"],
+    "default": "survey",
+    "timeout_hours": 48
+  }'
+```
+
+### Answering a request (interlocutor only)
+
+```bash
+curl -s -X POST "$CAMBIUM_API_URL/requests/REQUEST_ID/answer" \
+  -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer $CAMBIUM_TOKEN" \
+  -d '{"answer": "approve"}'
+```
+
+Only the interlocutor routine can answer requests — other routines get 403.
+
+### Rejecting a request (interlocutor only)
+
+```bash
+curl -s -X POST "$CAMBIUM_API_URL/requests/REQUEST_ID/reject" \
+  -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer $CAMBIUM_TOKEN"
+```
+
+### Querying requests
+
+```bash
+# List all pending requests
+curl -s "$CAMBIUM_API_URL/requests?status=pending"
+
+# Get a specific request
+curl -s "$CAMBIUM_API_URL/requests/REQUEST_ID"
+
+# Get summary counts for monitoring
+curl -s "$CAMBIUM_API_URL/requests/summary"
+```
+
+### Session resume flow
+
+When a user answers a blocking request:
+1. The answer is stored and a `resume` message is published
+2. The consumer reopens the originating session with the answer injected
+3. The routine picks up where it left off with full conversation context
+
+For blocking requests: create the request, then exit your session cleanly. Do not poll.
 
 ## Eval Framework
 

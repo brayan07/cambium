@@ -41,6 +41,7 @@ class WorkItemService:
         context: dict[str, Any] | None = None,
         max_attempts: int = 3,
         actor: str | None = None,
+        assigned_to: str | None = None,
         session_id: str | None = None,
     ) -> WorkItem:
         item = WorkItem.create(
@@ -54,6 +55,7 @@ class WorkItemService:
             context=context,
             max_attempts=max_attempts,
             actor=actor,
+            assigned_to=assigned_to,
             session_id=session_id,
         )
         self.store.create(item)
@@ -87,6 +89,7 @@ class WorkItemService:
                 context=spec.get("context", {}),
                 max_attempts=spec.get("max_attempts", 3),
                 actor=actor,
+                assigned_to=spec.get("assigned_to"),
                 session_id=session_id,
             )
             children.append(child)

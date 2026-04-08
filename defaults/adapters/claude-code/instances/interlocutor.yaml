@@ -3,4 +3,4 @@ adapter_type: claude-code
 config:
   model: opus
   system_prompt_path: adapters/claude-code/prompts/interlocutor.md
-  skills: [cambium-api]
+  skills: [cambium-api, user-alignment]
