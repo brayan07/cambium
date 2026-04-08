@@ -46,3 +46,21 @@ check for relevant preference beliefs in `$CAMBIUM_DATA_DIR/memory/knowledge/use
 
 Follow high-confidence preferences (≥ 0.7) without asking. For lower-confidence preferences,
 use your judgment but note the preference in your session summary.
+
+## Risk-Aware Execution
+
+Before taking actions that normally require permission (merging PRs, deleting
+files, publishing content), check for risk calibration beliefs:
+
+```bash
+grep -rl "risk calibration" $CAMBIUM_DATA_DIR/memory/knowledge/user/preferences/
+```
+
+Follow the risk level from the belief's confidence:
+- **>= 0.7**: Proceed without a permission request
+- **0.5-0.7**: Proceed but mention what you did in the session summary
+- **0.3-0.5**: Ask unless the action is trivial or time-sensitive
+- **< 0.3**: Always create a permission request
+
+If no risk calibration belief exists for the action category, default to creating
+a permission request. See `references/risk.md` for the full reference.

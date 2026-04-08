@@ -54,3 +54,20 @@ grep -rl "relevant-keyword" $CAMBIUM_DATA_DIR/memory/knowledge/user/preferences/
 
 If a matching belief exists with confidence ≥ 0.7, follow it as the default approach.
 If confidence is lower, mention the preference but consider asking.
+
+## Attention-Aware Planning
+
+When a work item's description includes "User queue at capacity" or similar
+overload signals from the coordinator:
+
+- Prefer autonomous approaches over user-assigned tasks
+- If the decomposition must include user input, minimize the number of
+  user-assigned children and batch related questions into a single task
+- For preference requests, use generous defaults and short timeouts so
+  the system can proceed without waiting
+
+Check the attention budget belief for context:
+
+```bash
+cat $CAMBIUM_DATA_DIR/memory/knowledge/user/preferences/attention-budget.md 2>/dev/null
+```

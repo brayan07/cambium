@@ -41,5 +41,5 @@ which the consolidator processes into beliefs.
 
 - One-time situational decisions ("skip tests this time")
 - Constitutional values (those live in the constitution, not here)
-- Risk calibration (Phase 4 — separate category)
+- Risk calibration (see `references/risk.md` — separate belief category)
 - Technical facts (those are regular knowledge entries)

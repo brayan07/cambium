@@ -1,0 +1,163 @@
+# Eval: Consolidator creates risk calibration beliefs from permission patterns.
+#
+# Strategy: Pre-seed session digests that describe repeated permission request
+# approvals for the same action category, then trigger a consolidator weekly
+# window. The consolidator should detect the pattern and create a risk
+# calibration belief file.
+#
+# Cost: ~$0.50 per trial (consolidator only)
+name: risk-calibration-detection
+trials: 3
+timeout: 300
+
+config_override:
+  adapters/claude-code/instances/memory-consolidator.yaml:
+    config:
+      model: sonnet
+
+scenarios:
+  - name: consolidator-creates-risk-belief-from-approval-pattern
+    seed_data:
+      - path: memory/sessions/2026-03-20-wiki-publish-1.md
+        content: |
+          ---
+          title: "Wiki publish — knowledge base update"
+          routine: session-summarizer
+          instance: executor
+          session_id: eval-risk-001
+          started: 2026-03-20T10:00:00Z
+          ended: 2026-03-20T10:30:00Z
+          ---
+
+          ## Summary
+
+          Executor updated the knowledge base wiki. Created a permission request
+          to publish the wiki entry. User approved without discussion within
+          30 minutes.
+
+          ## Notes
+
+          Permission request approved quickly — user seems comfortable with
+          wiki publishing.
+
+          ## Preference Signals
+
+          None detected
+
+      - path: memory/sessions/2026-03-25-wiki-publish-2.md
+        content: |
+          ---
+          title: "Wiki publish — research findings"
+          routine: session-summarizer
+          instance: executor
+          session_id: eval-risk-002
+          started: 2026-03-25T14:00:00Z
+          ended: 2026-03-25T14:45:00Z
+          ---
+
+          ## Summary
+
+          Executor published research findings to the wiki. Permission request
+          to publish was approved by the user with comment "looks good."
+
+          ## Notes
+
+          Second consecutive wiki publish approval this month.
+
+          ## Preference Signals
+
+          None detected
+
+      - path: memory/sessions/2026-03-30-wiki-publish-3.md
+        content: |
+          ---
+          title: "Wiki publish — architecture doc"
+          routine: session-summarizer
+          instance: executor
+          session_id: eval-risk-003
+          started: 2026-03-30T09:00:00Z
+          ended: 2026-03-30T09:25:00Z
+          ---
+
+          ## Summary
+
+          Executor published architecture documentation to the wiki. Permission
+          request approved immediately by the user.
+
+          ## Notes
+
+          Third consecutive wiki publish approval.
+
+          ## Preference Signals
+
+          None detected
+
+      - path: memory/sessions/2026-04-03-wiki-publish-4.md
+        content: |
+          ---
+          title: "Wiki publish — tool comparison"
+          routine: session-summarizer
+          instance: executor
+          session_id: eval-risk-004
+          started: 2026-04-03T11:00:00Z
+          ended: 2026-04-03T11:40:00Z
+          ---
+
+          ## Summary
+
+          Executor published a tool comparison to the wiki. Permission request
+          approved by the user within 15 minutes.
+
+          ## Notes
+
+          Fourth consecutive wiki publish approval. No rejections for this
+          action category across the entire month.
+
+          ## Preference Signals
+
+          None detected
+
+      - path: memory/sessions/2026-04-07-wiki-publish-5.md
+        content: |
+          ---
+          title: "Wiki publish — weekly digest summary"
+          routine: session-summarizer
+          instance: executor
+          session_id: eval-risk-005
+          started: 2026-04-07T10:00:00Z
+          ended: 2026-04-07T10:20:00Z
+          ---
+
+          ## Summary
+
+          Executor published a weekly digest summary to the wiki. Permission
+          request approved by the user. This is the fifth consecutive wiki
+          publish approval with no rejections over the past 3 weeks.
+
+          ## Notes
+
+          Strong pattern: user consistently approves wiki publishing without
+          hesitation. This may warrant a risk calibration belief.
+
+          ## Preference Signals
+
+          None detected
+
+    inject:
+      - channel: heartbeat
+        payload:
+          window: weekly
+          target: memory-consolidator
+
+    wait:
+      routine_completed: memory-consolidator
+
+    assertions:
+      - type: episode
+        routine: memory-consolidator
+        status: completed
+      - type: memory_committed
+      - type: deterministic
+        path: defaults/evals/scripts/check-risk-beliefs.sh
+        threshold: 0.5
+      - type: no_errors

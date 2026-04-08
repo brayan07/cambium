@@ -129,6 +129,94 @@ curl -s -X POST "$CAMBIUM_API_URL/requests" \
   }'
 ```
 
+### Attention Budget Maintenance (weekly only)
+
+During weekly consolidation, analyze the user's request response patterns to maintain an attention budget belief.
+
+1. Query request history:
+   ```bash
+   curl -s "$CAMBIUM_API_URL/requests?status=answered&limit=100"
+   curl -s "$CAMBIUM_API_URL/requests?status=expired&limit=100"
+   curl -s "$CAMBIUM_API_URL/requests/summary"
+   ```
+
+2. Analyze response patterns:
+   - **Average response latency**: time between `created_at` and `answered_at` for answered requests
+   - **Expired-to-answered ratio**: high expiration rate means requests are too frequent or low-value
+   - **Requests per day**: total volume over the past week
+   - **Active hours**: if detectable, when the user is most responsive
+
+3. Create or update `$CAMBIUM_DATA_DIR/memory/knowledge/user/preferences/attention-budget.md`:
+   ```markdown
+   ---
+   title: Attention budget
+   confidence: 0.5
+   last_confirmed: 2026-04-08
+   ---
+   User typically responds to requests within 2-4 hours during business hours.
+   Comfortable handling approximately 5 requests per day. Preference requests
+   that go unanswered tend to expire on weekends.
+
+   **Evidence:**
+   - Week of 2026-04-01: 12 requests answered (avg 3.2hr latency), 3 expired
+   - Week of 2026-03-25: 8 requests answered (avg 2.8hr latency), 1 expired
+   ```
+
+4. Start confidence at 0.5 for the first creation. Increase by 0.1 each week as data accumulates, up to 0.9.
+
+5. If insufficient data exists (fewer than 5 answered requests total), do not create the belief yet.
+
+### Risk Calibration Belief Management (weekly only)
+
+During weekly consolidation, analyze permission request outcomes to detect patterns in user trust.
+
+1. Query permission request history:
+   ```bash
+   curl -s "$CAMBIUM_API_URL/requests?status=answered&limit=200"
+   curl -s "$CAMBIUM_API_URL/requests?status=rejected&limit=200"
+   ```
+
+2. Filter responses for **permission-type** requests. Group by action category (inferred from the request summary — e.g., "merge PR", "publish wiki", "delete file").
+
+3. For each category with 5+ requests:
+   - **All approved**: Create or update a risk calibration belief with confidence proportional to the approval streak length and duration
+   - **Mixed**: Set confidence proportional to approval rate (e.g., 8 approved / 10 total = 0.8 × base)
+   - **All rejected**: Create belief with low confidence (< 0.3) — user wants to be asked
+
+4. Risk calibration belief file format:
+   ```markdown
+   ---
+   title: Risk calibration — {action category}
+   confidence: 0.6
+   last_confirmed: 2026-04-08
+   ---
+   {Description of what the user trusts or doesn't trust the system to do}
+
+   **Evidence:**
+   - 2026-03-15: approved {action} without discussion
+   - 2026-03-22: approved {action}, said "looks good"
+   - 2026-04-01: rejected {action}, wanted more context
+   ```
+
+5. **Promotion proposals**: If a risk calibration belief reaches confidence >= 0.8 **and** has 5+ consecutive approvals over 2+ weeks with no rejections, create a preference request proposing increased autonomy:
+   ```bash
+   curl -s -X POST "$CAMBIUM_API_URL/requests" \
+     -H 'Content-Type: application/json' \
+     -H "Authorization: Bearer $CAMBIUM_TOKEN" \
+     -d '{
+       "type": "preference",
+       "summary": "Risk calibration: auto-approve {category}?",
+       "detail": "You have approved all {category} actions for the past N weeks (M approvals, 0 rejections). Should I start doing these without asking?",
+       "options": ["Yes, proceed autonomously", "No, keep asking"],
+       "default": "No, keep asking",
+       "timeout_hours": 168
+     }'
+   ```
+
+6. **Demotion**: If the user rejects a previously-autonomous action, immediately lower the belief's confidence and add contradicting evidence. A single rejection can drop confidence significantly (e.g., from 0.8 to 0.4). No preference request is needed for demotion — it is immediate.
+
+7. **Safety invariant**: The system **never** silently increases its own autonomy. Every promotion goes through a user-facing preference request with "No, keep asking" as the default. Silence (timeout expiration) does NOT increase autonomy.
+
 ## Knowledge Entry Format
 
 Every knowledge file must have this frontmatter:

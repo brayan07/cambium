@@ -22,3 +22,5 @@ Each routine reads **only** its relevant reference file. Do not read files for o
 | **executor** | `references/executor.md` | Permission/information requests, session pause and resume |
 | **any routine** | `references/constitution.md` | When and how to read the user's stated values and goals |
 | **any routine** | `references/preferences.md` | How to read and interpret learned preference beliefs |
+| **coordinator** | `references/budget.md` | Attention budget beliefs, overload detection |
+| **any routine** | `references/risk.md` | Risk calibration beliefs, promotion/demotion flow |
