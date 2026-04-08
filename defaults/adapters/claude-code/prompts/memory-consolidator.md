@@ -168,15 +168,17 @@ During weekly consolidation, analyze the user's request response patterns to mai
 
 ### Risk Calibration Belief Management (weekly only)
 
-During weekly consolidation, analyze permission request outcomes to detect patterns in user trust.
+During weekly consolidation, analyze permission request outcomes to detect patterns in user trust. Use **two sources**:
 
-1. Query permission request history:
+1. Query permission request history from the API (primary source when data exists):
    ```bash
    curl -s "$CAMBIUM_API_URL/requests?status=answered&limit=200"
    curl -s "$CAMBIUM_API_URL/requests?status=rejected&limit=200"
    ```
 
-2. Filter responses for **permission-type** requests. Group by action category (inferred from the request summary — e.g., "merge PR", "publish wiki", "delete file").
+2. Also scan session digests from the past week for **permission request patterns** described in the narrative (e.g., "permission request approved", "user approved without discussion"). Digests often describe request outcomes even when API history is limited.
+
+Combine both sources. Group by action category (inferred from the request summary or digest narrative — e.g., "merge PR", "publish wiki", "delete file").
 
 3. For each category with 5+ requests:
    - **All approved**: Create or update a risk calibration belief with confidence proportional to the approval streak length and duration
