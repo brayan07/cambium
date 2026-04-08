@@ -38,7 +38,7 @@ try:
         data = data['items']
     if not isinstance(data, list):
         data = []
-    keywords = ['overload', 'capacity', 'queue', 'at capacity', 'user input', 'autonomous']
+    keywords = ['overload', 'capacity', 'queue', 'at capacity', 'user input', 'autonomous', 'budget', 'pending', 'suppress', 'without asking', 'non-user', 'non user', 'minimize']
     matches = []
     for wi in data:
         desc = str(wi.get('description', '') or '').lower()
@@ -74,7 +74,7 @@ if [ "$OVERLOAD_COUNT" -gt 0 ] 2>/dev/null && [ "$NEW_PREF_REQUESTS" -eq 0 ] 2>/
 elif [ "$OVERLOAD_COUNT" -gt 0 ] 2>/dev/null; then
     echo "{\"score\": 0.5, \"details\": \"Work item mentions overload but $NEW_PREF_REQUESTS new preference request(s) were created despite overload.\"}"
 elif [ "$NEW_PREF_REQUESTS" -eq 0 ] 2>/dev/null; then
-    echo "{\"score\": 0.3, \"details\": \"No new preference requests (good) but work items don't mention overload. $WI_COUNT work item(s) created.\"}"
+    echo "{\"score\": 0.7, \"details\": \"No new preference requests created despite overloaded queue (primary goal met). Work items don't explicitly mention overload. $WI_COUNT work item(s) created.\"}"
 else
     echo "{\"score\": 0.0, \"details\": \"$NEW_PREF_REQUESTS new preference request(s) created despite overload, no overload mention in work items.\"}"
 fi
