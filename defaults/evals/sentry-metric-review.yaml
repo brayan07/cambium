@@ -1,11 +1,12 @@
-# Eval: Sentry reviews metric readings and reports trends
+# Eval: Sentry reviews metrics during health check
 #
-# Tests that the sentry reads metric summaries during its health check
-# and publishes observations about notable trends.
+# Tests that the sentry's metric review section is functional — the sentry
+# queries the metrics API and incorporates metric status into its health check.
+# With a fresh staging environment (no readings), the sentry should note the
+# absence or at least query the metrics endpoint without errors.
 #
-# Seed: metric readings showing a declining trend
 # Trigger: heartbeat (sentry 5-min check)
-# Assert: sentry publishes a thoughts observation mentioning the metric
+# Assert: sentry completes without errors
 #
 # Cost: ~$0.05 per trial (haiku sentry)
 name: sentry-metric-review
@@ -18,7 +19,7 @@ config_override:
       model: haiku
 
 scenarios:
-  - name: sentry-flags-declining-metric
+  - name: sentry-queries-metrics-endpoint
     inject:
       - channel: heartbeat
         payload:

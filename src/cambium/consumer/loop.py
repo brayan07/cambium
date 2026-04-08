@@ -301,10 +301,13 @@ class ConsumerLoop:
         # 1. Flush any expired batch buffers
         batch_futures = self._flush_expired_batches()
 
-        # 2. Consume messages (include system-level 'resume' channel)
-        channels = self.routine_registry.subscribed_channels()
+        # 2. Consume messages (include system-level channels)
+        channels = set(self.routine_registry.subscribed_channels())
         if self.request_service is not None:
-            channels = list(set(channels) | {"resume"})
+            channels.add("resume")
+        if self.metric_runner is not None:
+            channels.add("heartbeat")
+        channels = list(channels)
         if not channels:
             return []
 

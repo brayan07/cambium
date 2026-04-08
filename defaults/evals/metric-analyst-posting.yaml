@@ -1,13 +1,14 @@
 # Eval: Metric analyst posts readings when dispatched
 #
 # Tests that the metric-analyst routine receives a metric_collect message,
-# reads context, and posts a reading via the metrics API.
+# reads context (constitution, work items), and posts a reading via the
+# metrics API for the goal_progress_estimate metric.
 #
-# Seed: goal_progress_estimate metric config (loaded from defaults/metrics.yaml)
-# Trigger: metric_collect message with target=metric-analyst-heavy
-# Assert: reading recorded for goal_progress_estimate
+# Seed: constitution with clear goals for the analyst to assess
+# Trigger: metric_collect message targeting metric-analyst-heavy
+# Assert: episode completes, reading posted with value in 0-1 range
 #
-# Cost: ~$0.10 per trial (haiku analyst)
+# Cost: ~$0.10 per trial (sonnet overridden to haiku for eval)
 name: metric-analyst-posting
 trials: 1
 timeout: 120
@@ -20,7 +21,6 @@ config_override:
 scenarios:
   - name: analyst-posts-goal-progress-reading
     seed_data:
-      # Seed a constitution for the analyst to read
       - path: constitution.md
         content: |
           # My Constitution
@@ -43,4 +43,7 @@ scenarios:
       - type: episode
         routine: metric-analyst-heavy
         status: completed
+      - type: deterministic
+        path: defaults/evals/scripts/check-metric-reading-posted.sh
+        threshold: 0.5
       - type: no_errors
