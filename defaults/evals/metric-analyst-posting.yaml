@@ -1,10 +1,10 @@
 # Eval: Metric analyst posts readings when dispatched
 #
 # Tests that the metric-analyst routine receives a metric_collect message,
-# reads context (constitution, work items), and posts a reading via the
-# metrics API for the goal_progress_estimate metric.
+# reads available context, and posts a reading via the metrics API for the
+# goal_progress_estimate metric. Even with limited context in staging, the
+# analyst should post a reading (0.5 with gap explanation per prompt).
 #
-# Seed: constitution with clear goals for the analyst to assess
 # Trigger: metric_collect message targeting metric-analyst-heavy
 # Assert: episode completes, reading posted with value in 0-1 range
 #
@@ -20,15 +20,6 @@ config_override:
 
 scenarios:
   - name: analyst-posts-goal-progress-reading
-    seed_data:
-      - path: constitution.md
-        content: |
-          # My Constitution
-          ## Goals
-          1. Build effective AI agent systems
-          2. Maintain physical and mental health
-          3. Contribute to AI safety research
-
     inject:
       - channel: metric_collect
         payload:

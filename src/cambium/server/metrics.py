@@ -105,17 +105,14 @@ def _reading_to_response(r) -> ReadingResponse:
 def list_metrics(
     type: str | None = Query(None),
     tag: str | None = Query(None),
-    authorization: str = Header(None),
 ):
-    authenticate(authorization)
     service = _get_service()
     metrics = service.get_metrics(type=type, tag=tag)
     return [_metric_to_response(m) for m in metrics]
 
 
 @router.get("/{name}", response_model=MetricResponse)
-def get_metric(name: str, authorization: str = Header(None)):
-    authenticate(authorization)
+def get_metric(name: str):
     service = _get_service()
     metric = service.get_metric(name)
     if metric is None:
@@ -129,9 +126,7 @@ def list_readings(
     since: str | None = Query(None),
     until: str | None = Query(None),
     limit: int = Query(100, ge=1, le=1000),
-    authorization: str = Header(None),
 ):
-    authenticate(authorization)
     service = _get_service()
     if service.get_metric(name) is None:
         raise HTTPException(status_code=404, detail=f"Metric '{name}' not found")
@@ -163,9 +158,7 @@ def get_summary(
     name: str,
     since: str | None = Query(None),
     until: str | None = Query(None),
-    authorization: str = Header(None),
 ):
-    authenticate(authorization)
     service = _get_service()
     if service.get_metric(name) is None:
         raise HTTPException(status_code=404, detail=f"Metric '{name}' not found")
