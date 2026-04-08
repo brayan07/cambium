@@ -12,6 +12,7 @@ class RequestType(str, Enum):
     PERMISSION = "permission"
     INFORMATION = "information"
     PREFERENCE = "preference"
+    SURVEY = "survey"
 
 
 class RequestStatus(str, Enum):

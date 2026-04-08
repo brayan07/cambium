@@ -1,0 +1,6 @@
+name: metric-analyst
+adapter_type: claude-code
+config:
+  model: haiku
+  system_prompt_path: adapters/claude-code/prompts/metric-analyst.md
+  skills: [cambium-api, cambium-self-improvement, user-alignment]

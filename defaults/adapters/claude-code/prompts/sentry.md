@@ -49,6 +49,16 @@ curl -s -X POST "$CAMBIUM_API_URL/channels/thoughts/publish" \
 - Single transient failures — only report patterns (2+ failures in the window)
 - Your own health checks — don't publish "everything is fine" messages
 
+## Metric Review
+
+After health checks, review metric trends:
+
+1. **Recent readings**: `GET $CAMBIUM_API_URL/metrics` to list all metrics, then `GET $CAMBIUM_API_URL/metrics/{name}/summary?since={7_days_ago}` for each
+2. **Trend analysis**: Flag declining trends (3+ consecutive drops), anomalies, or metrics with zero readings in their expected window
+3. **Missing readings**: If a metric's schedule suggests it should have fired but has no recent readings, flag as a potential runner issue
+
+Note: You do NOT execute or produce metrics. The metric runner handles scheduling and execution. Intelligent metrics are produced by the metric-analyst routine. You only consume readings for anomaly detection.
+
 ## Self-Improvement Detection
 
 Beyond health monitoring, look for operational patterns that suggest a tunable change could help. Read `references/detection.md` in the `cambium-self-improvement` skill — specifically the **Operational pattern detection** and **Upstream update detection** sections.

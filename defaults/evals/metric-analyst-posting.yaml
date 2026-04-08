@@ -1,0 +1,46 @@
+# Eval: Metric analyst posts readings when dispatched
+#
+# Tests that the metric-analyst routine receives a metric_collect message,
+# reads context, and posts a reading via the metrics API.
+#
+# Seed: goal_progress_estimate metric config (loaded from defaults/metrics.yaml)
+# Trigger: metric_collect message with target=metric-analyst-heavy
+# Assert: reading recorded for goal_progress_estimate
+#
+# Cost: ~$0.10 per trial (haiku analyst)
+name: metric-analyst-posting
+trials: 1
+timeout: 120
+
+config_override:
+  adapters/claude-code/instances/metric-analyst-heavy.yaml:
+    config:
+      model: haiku
+
+scenarios:
+  - name: analyst-posts-goal-progress-reading
+    seed_data:
+      # Seed a constitution for the analyst to read
+      - path: constitution.md
+        content: |
+          # My Constitution
+          ## Goals
+          1. Build effective AI agent systems
+          2. Maintain physical and mental health
+          3. Contribute to AI safety research
+
+    inject:
+      - channel: metric_collect
+        payload:
+          target: metric-analyst-heavy
+          metrics:
+            - goal_progress_estimate
+
+    wait:
+      routine_completed: metric-analyst-heavy
+
+    assertions:
+      - type: episode
+        routine: metric-analyst-heavy
+        status: completed
+      - type: no_errors

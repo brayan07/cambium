@@ -37,6 +37,7 @@ class ConsumerLoop:
         max_workers: int = _DEFAULT_MAX_WORKERS,
         request_service: RequestService | None = None,
         session_store: SessionStore | None = None,
+        metric_runner=None,
     ) -> None:
         self.queue = queue
         self.routine_registry = routine_registry
@@ -44,6 +45,7 @@ class ConsumerLoop:
         self.broadcaster_registry = broadcaster_registry
         self.poll_interval = poll_interval
         self.live = live
+        self.metric_runner = metric_runner
         self._executor = ThreadPoolExecutor(max_workers=max_workers)
         self.request_service = request_service
         self.session_store = session_store
@@ -316,6 +318,16 @@ class ConsumerLoop:
             if message.channel == "resume" and self.request_service is not None:
                 future = self._executor.submit(self._handle_resume, message)
                 message_futures.append((message, [future]))
+                continue
+
+            # Metric runner — pure Python, no LLM routine
+            target = message.payload.get("target") if message.payload else None
+            if target == "metric-runner" and self.metric_runner is not None:
+                try:
+                    self.metric_runner.tick()
+                except Exception:
+                    log.exception("MetricRunner tick failed")
+                self.queue.ack(message.id)
                 continue
 
             routines = self.routine_registry.for_channel(message.channel)

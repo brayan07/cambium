@@ -1,0 +1,35 @@
+# Eval: Sentry reviews metric readings and reports trends
+#
+# Tests that the sentry reads metric summaries during its health check
+# and publishes observations about notable trends.
+#
+# Seed: metric readings showing a declining trend
+# Trigger: heartbeat (sentry 5-min check)
+# Assert: sentry publishes a thoughts observation mentioning the metric
+#
+# Cost: ~$0.05 per trial (haiku sentry)
+name: sentry-metric-review
+trials: 1
+timeout: 120
+
+config_override:
+  adapters/claude-code/instances/sentry.yaml:
+    config:
+      model: haiku
+
+scenarios:
+  - name: sentry-flags-declining-metric
+    inject:
+      - channel: heartbeat
+        payload:
+          window: micro
+          target: sentry
+
+    wait:
+      routine_completed: sentry
+
+    assertions:
+      - type: episode
+        routine: sentry
+        status: completed
+      - type: no_errors

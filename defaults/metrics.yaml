@@ -1,0 +1,44 @@
+metrics:
+  - name: request_answer_rate
+    type: deterministic
+    description: "Ratio of answered to total (answered + expired) requests in the past 7 days"
+    unit: ratio
+    tags: [health, requests]
+    script_path: metrics/scripts/request-answer-rate.sh
+    schedule: "0 */6 * * *"
+
+  - name: request_avg_response_hours
+    type: deterministic
+    description: "Average hours between request creation and answer in the past 7 days"
+    unit: hours
+    tags: [health, requests, attention]
+    script_path: metrics/scripts/request-response-time.sh
+    schedule: "0 */6 * * *"
+
+  - name: weekly_productivity_rating
+    type: survey
+    description: "User's self-assessed productivity for the week"
+    unit: score_1_5
+    tags: [wellbeing, user]
+    survey_summary: "How would you rate your overall productivity this week?"
+    survey_detail: "1 = very unproductive, 5 = very productive"
+    survey_options: ["1", "2", "3", "4", "5"]
+    schedule: "0 18 * * 0"
+
+  - name: weekly_alignment_rating
+    type: survey
+    description: "How aligned Cambium's suggestions felt this week"
+    unit: score_1_5
+    tags: [alignment, user]
+    survey_summary: "How aligned were Cambium's suggestions with your priorities this week?"
+    survey_detail: "1 = not at all, 5 = perfectly aligned"
+    survey_options: ["1", "2", "3", "4", "5"]
+    schedule: "0 18 * * 0"
+
+  - name: goal_progress_estimate
+    type: intelligent
+    description: "Metric-analyst's estimate of progress toward user's top constitutional goals"
+    unit: score_0_1
+    tags: [alignment, goals]
+    schedule: "0 6 * * *"
+    instance: metric-analyst-heavy
