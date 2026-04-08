@@ -85,7 +85,7 @@ def cmd_chat(args: argparse.Namespace) -> None:
         sys.exit(1)
 
     # Resolve adapter type (skills and prompts resolve relative to config_dir)
-    adapter_types = _build_adapter_types(config_dir)
+    adapter_types = _build_adapter_types(config_dir, data_dir=data_dir)
     adapter = adapter_types.get(instance.adapter_type)
     if adapter is None:
         print(f"Error: adapter type '{instance.adapter_type}' not found", file=sys.stderr)
@@ -162,7 +162,7 @@ def cmd_eval(args: argparse.Namespace) -> None:
         sys.exit(1)
 
 
-def _build_adapter_types(user_dir):
+def _build_adapter_types(user_dir, data_dir=None):
     """Build the registry of adapter types from the user directory."""
     from cambium.adapters.claude_code import ClaudeCodeAdapter
     from cambium.mcp.file_registry import FileRegistry
@@ -173,7 +173,7 @@ def _build_adapter_types(user_dir):
 
     mcp_registry = FileRegistry(user_dir / "mcp-servers.json")
 
-    claude_adapter = ClaudeCodeAdapter(skill_registry, user_dir=user_dir, mcp_registry=mcp_registry)
+    claude_adapter = ClaudeCodeAdapter(skill_registry, user_dir=user_dir, mcp_registry=mcp_registry, data_dir=data_dir)
     return {claude_adapter.name: claude_adapter}
 
 

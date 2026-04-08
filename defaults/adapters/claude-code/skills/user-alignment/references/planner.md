@@ -43,3 +43,14 @@ curl -s -X POST "$CAMBIUM_API_URL/requests" \
 After creating a preference request:
 - Proceed with the default
 - The system may adjust later based on the user's answer
+
+## Preference-Aware Planning
+
+Before choosing between multiple valid approaches, check for relevant preference beliefs:
+
+```bash
+grep -rl "relevant-keyword" $CAMBIUM_DATA_DIR/memory/knowledge/user/preferences/
+```
+
+If a matching belief exists with confidence ≥ 0.7, follow it as the default approach.
+If confidence is lower, mention the preference but consider asking.

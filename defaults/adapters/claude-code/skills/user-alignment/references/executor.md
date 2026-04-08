@@ -38,3 +38,11 @@ curl -s -X POST "$CAMBIUM_API_URL/requests" \
 - Permission and information requests **never expire** — they wait until the user responds
 - Preference requests have a default and timeout — they expire automatically
 - Block the work item if you can't proceed: `POST /work-items/ITEM_ID/block`
+
+## Preference-Aware Execution
+
+Before making implementation choices (code style, tool selection, output format),
+check for relevant preference beliefs in `$CAMBIUM_DATA_DIR/memory/knowledge/user/preferences/`.
+
+Follow high-confidence preferences (≥ 0.7) without asking. For lower-confidence preferences,
+use your judgment but note the preference in your session summary.

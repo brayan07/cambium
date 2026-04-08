@@ -40,10 +40,10 @@ scenarios:
         payload:
           window: micro
           target: sentry
-      # 3. Trigger memory consolidator (hourly scan — finds empty state, completes cleanly)
+      # 3. Trigger memory consolidator (scan — finds empty state, completes cleanly)
       - channel: heartbeat
         payload:
-          window: hourly
+          window: scan
           target: memory-consolidator
     wait:
       cascade_settled: true

@@ -21,3 +21,4 @@ Each routine reads **only** its relevant reference file. Do not read files for o
 | **planner** | `references/planner.md` | Assigning tasks to user, creating preference requests |
 | **executor** | `references/executor.md` | Permission/information requests, session pause and resume |
 | **any routine** | `references/constitution.md` | When and how to read the user's stated values and goals |
+| **any routine** | `references/preferences.md` | How to read and interpret learned preference beliefs |
