@@ -66,3 +66,10 @@ curl -s -X POST "$CAMBIUM_API_URL/requests" \
 ```
 
 After creating the request, proceed with the default. When the user responds, the system may adjust the plan.
+
+## Constitution
+
+When decomposing objectives that touch user goals or values:
+`cat "$CAMBIUM_CONFIG_DIR/constitution.md"`
+
+Use it to calibrate priority among competing tasks, scope decisions (thoroughness vs. speed), and whether to create a preference request or proceed with a values-informed default.

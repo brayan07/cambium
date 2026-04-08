@@ -1,6 +1,6 @@
 ---
 name: user-alignment
-description: Human-in-the-loop protocol — request types, user task assignment, and session resume flow. Use when creating requests for user input, assigning tasks to the user, or checking pending user requests.
+description: Human-in-the-loop protocol — request types, user task assignment, session resume flow, and constitution. Use when creating requests for user input, assigning tasks to the user, checking pending user requests, or consulting the user's stated values/goals.
 ---
 
 # User Alignment
@@ -20,3 +20,4 @@ Each routine reads **only** its relevant reference file. Do not read files for o
 | **coordinator** | `references/coordinator.md` | Monitoring user queue, overload detection, replanning signals |
 | **planner** | `references/planner.md` | Assigning tasks to user, creating preference requests |
 | **executor** | `references/executor.md` | Permission/information requests, session pause and resume |
+| **any routine** | `references/constitution.md` | When and how to read the user's stated values and goals |

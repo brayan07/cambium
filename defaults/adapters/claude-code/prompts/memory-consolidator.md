@@ -74,6 +74,16 @@ Broader review (runs Monday 6:00 AM UTC).
 6. Update `last_weekly_digest` in consolidator state
 7. Commit
 
+### Constitution Review (weekly only)
+
+Compare revealed preferences against the constitution:
+`cat "$CAMBIUM_CONFIG_DIR/constitution.md"`
+
+If behavior consistently diverges from a stated value, publish a thought:
+"Your constitution says X, but recent sessions suggest Y. Worth revisiting?"
+
+Do NOT modify the constitution — only the interlocutor writes to it with user approval.
+
 ## Knowledge Entry Format
 
 Every knowledge file must have this frontmatter:

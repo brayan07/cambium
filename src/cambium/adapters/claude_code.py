@@ -128,6 +128,8 @@ class ClaudeCodeAdapter(AdapterType):
             env = os.environ.copy()
             env["CAMBIUM_TOKEN"] = session_token
             env["CAMBIUM_API_URL"] = api_base_url
+            if self.user_dir:
+                env["CAMBIUM_CONFIG_DIR"] = str(self.user_dir)
 
             log.info(
                 f"{'Resuming' if resume else 'Starting'} session '{session_id[:8]}' "

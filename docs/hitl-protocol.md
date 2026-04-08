@@ -241,7 +241,7 @@ The memory repo is human-readable markdown with full git history. The UI exposes
 
 ### 4. Constitution
 
-The constitution is a markdown document where the user articulates their values, goals, and priorities. It lives at `~/.cambium/memory/constitution.md` (git-tracked in the memory repo).
+The constitution is a markdown document where the user articulates their values, goals, and priorities. It lives at `{config_dir}/constitution.md` in the user's versioned repository — not in the system's internal memory.
 
 #### Initialization
 
