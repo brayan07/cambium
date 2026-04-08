@@ -330,6 +330,8 @@ class ClaudeCodeAdapter(AdapterType):
             f"instance='{instance.name}' model={model}"
         )
 
+        if self.user_dir:
+            os.environ["CAMBIUM_CONFIG_DIR"] = str(self.user_dir)
         if cwd:
             os.chdir(cwd)
         os.execvp("claude", cmd)
