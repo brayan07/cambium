@@ -92,6 +92,10 @@ class EvalRunner:
                 if scenario.seed_data:
                     self._seed_data(ctx, scenario.seed_data)
 
+                # Seed requests into the staging DB
+                if scenario.seed_requests:
+                    self._seed_requests(ctx, scenario.seed_requests)
+
                 # Inject messages
                 for injection in scenario.inject:
                     if injection.delay > 0:
@@ -149,6 +153,25 @@ class EvalRunner:
                 cwd=memory_dir, capture_output=True, check=True,
             )
             log.debug("    Committed seed data to memory repo")
+
+    def _seed_requests(self, ctx: StagingContext, seed_requests) -> None:
+        """Seed requests into the staging DB via the /requests/seed endpoint."""
+        for sr in seed_requests:
+            payload = {
+                "type": sr.type,
+                "summary": sr.summary,
+                "detail": sr.detail,
+                "session_id": sr.session_id,
+                "created_by": sr.created_by,
+            }
+            if sr.options:
+                payload["options"] = sr.options
+            if sr.default:
+                payload["default"] = sr.default
+            if sr.timeout_hours:
+                payload["timeout_hours"] = sr.timeout_hours
+            ctx.post("/requests/seed", payload)
+            log.debug(f"    Seeded request: {sr.summary}")
 
     def _wait(self, ctx: StagingContext, wait, timeout: int) -> None:
         """Wait for the specified condition."""

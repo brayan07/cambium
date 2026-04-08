@@ -173,6 +173,45 @@ def reject_request(
     return {"status": "rejected"}
 
 
+class SeedRequestRequest(BaseModel):
+    """Seed a request directly — no auth required. For eval staging only."""
+    type: str
+    summary: str
+    detail: str = ""
+    options: list[str] | None = None
+    default: str | None = None
+    timeout_hours: float | None = None
+    session_id: str = "seed-session"
+    created_by: str = "seed"
+
+
+@router.post("/seed", response_model=RequestResponse, status_code=201)
+def seed_request(body: SeedRequestRequest):
+    """Seed a request without authentication. For eval/test staging."""
+    from cambium.request.model import RequestType
+
+    service = _get_service()
+    try:
+        request_type = RequestType(body.type)
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid request type: {body.type}",
+        )
+
+    request = service.create_request(
+        session_id=body.session_id,
+        type=request_type,
+        summary=body.summary,
+        detail=body.detail,
+        options=body.options,
+        default=body.default,
+        timeout_hours=body.timeout_hours,
+        created_by=body.created_by,
+    )
+    return _request_to_response(request)
+
+
 @router.get("/summary", response_model=RequestSummary)
 def get_summary():
     """Get request counts by type and status."""
