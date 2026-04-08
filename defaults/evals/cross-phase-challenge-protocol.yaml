@@ -1,0 +1,95 @@
+# Eval: Challenge protocol end-to-end (Phases 1 + 3)
+#
+# Tests the most complex cross-phase interaction: a high-confidence preference
+# belief is contradicted by a new preference signal in a digest. The consolidator
+# should detect the contradiction and create a PREFERENCE request via the Phase 1
+# request infrastructure (not just update the belief silently).
+#
+# Seed: a high-confidence belief + a digest with a contradicting signal
+# Trigger: consolidator scan
+# Assert: PREFERENCE request created about the conflict
+#
+# Cost: ~$0.50 per trial (consolidator only)
+name: cross-phase-challenge-protocol
+trials: 3
+timeout: 300
+
+config_override:
+  adapters/claude-code/instances/memory-consolidator.yaml:
+    config:
+      model: sonnet
+
+scenarios:
+  - name: contradiction-triggers-preference-request
+    seed_data:
+      # Pre-existing high-confidence preference belief
+      - path: memory/knowledge/user/preferences/pr-strategy.md
+        content: |
+          ---
+          title: Prefers bundled PRs for refactors
+          confidence: 0.85
+          last_confirmed: 2026-04-01
+          ---
+          User prefers a single bundled PR over many small PRs when refactoring
+          related code in the same area.
+
+          **Evidence:**
+          - 2026-03-15 planner session: user corrected approach from 4 PRs to 1
+          - 2026-03-22 executor session: user confirmed bundled approach
+          - 2026-04-01 interlocutor session: user reaffirmed this is a general preference
+
+      # New digest with a contradicting preference signal
+      - path: memory/sessions/2026-04-08-contradicting-session.md
+        content: |
+          ---
+          title: "Refactor session — auth module"
+          routine: session-summarizer
+          instance: executor
+          session_id: eval-challenge-001
+          started: 2026-04-08T14:00:00Z
+          ended: 2026-04-08T15:30:00Z
+          ---
+
+          ## Summary
+
+          User asked the executor to refactor the auth module. When presented with
+          a bundled PR approach, the user explicitly said: "Actually, split this
+          into separate PRs — one for the middleware changes and one for the token
+          handling. I want to review them independently."
+
+          ## Key Decisions
+
+          - Split auth refactor into 2 separate PRs instead of 1 bundled PR
+          - User reviewed middleware PR first before the token PR was created
+
+          ## Notes
+
+          This contradicts the established preference for bundled PRs. The user
+          seemed to want granular review control for security-sensitive code.
+
+          ## Preference Signals
+
+          - **Explicit correction (confidence: explicit):** User said "split this
+            into separate PRs" when presented with a bundled approach. This directly
+            contradicts the existing preference for bundled PRs (confidence 0.85).
+            The user's reasoning was wanting independent review for security-sensitive
+            changes.
+
+    inject:
+      - channel: heartbeat
+        payload:
+          window: scan
+          target: memory-consolidator
+
+    wait:
+      routine_completed: memory-consolidator
+
+    assertions:
+      - type: episode
+        routine: memory-consolidator
+        status: completed
+      - type: memory_committed
+      - type: deterministic
+        path: defaults/evals/scripts/check-challenge-request-created.sh
+        threshold: 0.5
+      - type: no_errors
