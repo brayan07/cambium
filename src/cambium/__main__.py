@@ -96,8 +96,10 @@ def cmd_chat(args: argparse.Namespace) -> None:
     session_dir.mkdir(parents=True, exist_ok=True)
     print(f"Starting chat (routine: {args.routine}, config: {config_dir}, session: {session_id[:8]})")
 
+    initial_message = args.message if args.message else "Session started."
+
     try:
-        adapter.attach(instance, session_id, cwd=session_dir)
+        adapter.attach(instance, session_id, cwd=session_dir, initial_message=initial_message)
     except NotImplementedError as e:
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
@@ -207,6 +209,7 @@ def main() -> None:
     chat.add_argument("routine", help="Routine name (e.g. interlocutor)")
     chat.add_argument("--repo-dir", help="Directory with code and configs (default: cwd)")
     chat.add_argument("--data-dir", help="Directory for runtime state (default: ~/.cambium)")
+    chat.add_argument("-m", "--message", help="Initial message (default: 'Session started.')")
 
     # eval
     eval_parser = sub.add_parser("eval", help="Run evaluations against a staging instance")

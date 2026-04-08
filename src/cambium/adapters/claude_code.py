@@ -290,6 +290,7 @@ class ClaudeCodeAdapter(AdapterType):
 
     def attach(
         self, instance: AdapterInstance, session_id: str, cwd: Path | None = None,
+        initial_message: str | None = None,
     ) -> None:
         """Attach to a Claude Code session.
 
@@ -329,6 +330,9 @@ class ClaudeCodeAdapter(AdapterType):
             f"Attaching to session '{session_id[:8]}' "
             f"instance='{instance.name}' model={model}"
         )
+
+        if initial_message:
+            cmd.append(initial_message)
 
         if self.user_dir:
             os.environ["CAMBIUM_CONFIG_DIR"] = str(self.user_dir)
