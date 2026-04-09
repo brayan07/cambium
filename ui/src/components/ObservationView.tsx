@@ -1,59 +1,34 @@
 import { useEffect, useRef, useMemo } from "react";
 import { useSessionStream } from "../hooks/useSessionStream";
-import { TranscriptMessage, ToolCallGroup } from "./TranscriptMessage";
-import type { TranscriptEntry } from "../hooks/useSessionStream";
+import { MessageList, type DisplayMessage } from "./MessageList";
 import type { Session } from "../lib/types";
 
 interface ObservationViewProps {
   session: Session;
 }
 
-/** Group consecutive tool_call entries together, leave others as-is. */
-type DisplayItem =
-  | { type: "entry"; entry: TranscriptEntry }
-  | { type: "tool_group"; entries: TranscriptEntry[]; key: string };
-
-function groupEntries(entries: TranscriptEntry[]): DisplayItem[] {
-  const items: DisplayItem[] = [];
-  let toolBuffer: TranscriptEntry[] = [];
-
-  function flushTools() {
-    if (toolBuffer.length > 0) {
-      items.push({
-        type: "tool_group",
-        entries: [...toolBuffer],
-        key: toolBuffer[0].id,
-      });
-      toolBuffer = [];
-    }
-  }
-
-  for (const entry of entries) {
-    if (entry.kind === "tool_call") {
-      toolBuffer.push(entry);
-    } else {
-      flushTools();
-      items.push({ type: "entry", entry });
-    }
-  }
-  flushTools();
-
-  return items;
-}
-
 export function ObservationView({ session }: ObservationViewProps) {
   const { entries, state } = useSessionStream(session.id);
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  const displayItems = useMemo(() => groupEntries(entries), [entries]);
+  // Map SSE entries to the shared DisplayMessage shape
+  const messages: DisplayMessage[] = useMemo(
+    () =>
+      entries.map((e) => ({
+        id: e.id,
+        content: e.content,
+        role: e.kind === "tool_call" ? "tool" as const : e.kind === "thinking" ? "thinking" as const : "assistant" as const,
+        timestamp: e.timestamp,
+      })),
+    [entries],
+  );
 
-  // Auto-scroll on new entries
   useEffect(() => {
     const el = scrollRef.current;
     if (el) {
       el.scrollTop = el.scrollHeight;
     }
-  }, [displayItems]);
+  }, [messages]);
 
   return (
     <div className="flex h-full w-full flex-col">
@@ -88,13 +63,7 @@ export function ObservationView({ session }: ObservationViewProps) {
           </div>
         )}
 
-        {displayItems.map((item) =>
-          item.type === "tool_group" ? (
-            <ToolCallGroup key={item.key} entries={item.entries} />
-          ) : (
-            <TranscriptMessage key={item.entry.id} entry={item.entry} />
-          ),
-        )}
+        <MessageList messages={messages} />
 
         {state === "done" && (
           <div className="flex justify-center px-4 py-4">
