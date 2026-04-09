@@ -196,6 +196,167 @@ class TestSurveyFiring:
         assert len(reading_store.list_readings("weekly_test")) == 1
 
 
+class TestScriptEdgeCases:
+    """Edge cases for deterministic script execution."""
+
+    def test_invalid_json_output(self, reading_store, request_service, queue, tmp_path) -> None:
+        """Script that outputs non-JSON should fail gracefully."""
+        script = tmp_path / "bad_json.sh"
+        script.write_text("#!/bin/bash\necho 'not json at all'")
+        script.chmod(0o755)
+
+        metric = DeterministicMetric(
+            name="bad_json", type=MetricType.DETERMINISTIC,
+            description="", unit="", tags=[], schedule="* * * * *",
+            script_path="bad_json.sh",
+        )
+        runner = MetricRunner(
+            metrics=[metric], store=reading_store,
+            request_service=request_service, queue=queue,
+            config_dir=tmp_path,
+        )
+        # _execute_script should raise json.JSONDecodeError
+        with pytest.raises(json.JSONDecodeError):
+            runner._execute_script(metric)
+
+    def test_invalid_json_does_not_record(self, reading_store, request_service, queue, tmp_path) -> None:
+        """Script with bad JSON produces no reading but doesn't crash the runner."""
+        script = tmp_path / "bad.sh"
+        script.write_text("#!/bin/bash\necho '{broken'")
+        script.chmod(0o755)
+
+        metric = DeterministicMetric(
+            name="bad", type=MetricType.DETERMINISTIC,
+            description="", unit="", tags=[], schedule="* * * * *",
+            script_path="bad.sh",
+        )
+        runner = MetricRunner(
+            metrics=[metric], store=reading_store,
+            request_service=request_service, queue=queue,
+            config_dir=tmp_path,
+        )
+        # tick-level method catches exceptions
+        runner._run_due_deterministic(datetime.now(timezone.utc))
+        assert len(reading_store.list_readings("bad")) == 0
+
+    def test_script_timeout(self, reading_store, request_service, queue, tmp_path) -> None:
+        """Script that exceeds timeout raises subprocess.TimeoutExpired."""
+        script = tmp_path / "slow.sh"
+        script.write_text("#!/bin/bash\nsleep 60\necho '{\"value\": 1.0}'")
+        script.chmod(0o755)
+
+        metric = DeterministicMetric(
+            name="slow", type=MetricType.DETERMINISTIC,
+            description="", unit="", tags=[], schedule="* * * * *",
+            script_path="slow.sh",
+        )
+        runner = MetricRunner(
+            metrics=[metric], store=reading_store,
+            request_service=request_service, queue=queue,
+            config_dir=tmp_path,
+        )
+        import subprocess as sp
+        with pytest.raises(sp.TimeoutExpired):
+            runner._execute_script(metric)
+
+    def test_nonzero_exit_raises(self, reading_store, request_service, queue, tmp_path) -> None:
+        """Script exiting non-zero raises RuntimeError."""
+        script = tmp_path / "fail.sh"
+        script.write_text("#!/bin/bash\necho 'oops' >&2\nexit 2")
+        script.chmod(0o755)
+
+        metric = DeterministicMetric(
+            name="fail", type=MetricType.DETERMINISTIC,
+            description="", unit="", tags=[], schedule="* * * * *",
+            script_path="fail.sh",
+        )
+        runner = MetricRunner(
+            metrics=[metric], store=reading_store,
+            request_service=request_service, queue=queue,
+            config_dir=tmp_path,
+        )
+        with pytest.raises(RuntimeError, match="exited 2"):
+            runner._execute_script(metric)
+
+    def test_missing_script_raises(self, reading_store, request_service, queue, tmp_path) -> None:
+        """Script path that doesn't exist raises FileNotFoundError."""
+        metric = DeterministicMetric(
+            name="missing", type=MetricType.DETERMINISTIC,
+            description="", unit="", tags=[], schedule="* * * * *",
+            script_path="does_not_exist.sh",
+        )
+        runner = MetricRunner(
+            metrics=[metric], store=reading_store,
+            request_service=request_service, queue=queue,
+            config_dir=tmp_path,
+        )
+        with pytest.raises(FileNotFoundError):
+            runner._execute_script(metric)
+
+
+class TestSurveyAnswerEdgeCases:
+    """Edge cases for survey response processing."""
+
+    def test_non_numeric_answer_skipped(self, reading_store, request_service, queue) -> None:
+        """Survey answer that isn't a number produces no reading."""
+        metric = SurveyMetric(
+            name="test_survey", type=MetricType.SURVEY,
+            description="", unit="score_1_5", tags=[], schedule="* * * * *",
+            survey_summary="Rate?", survey_options=["1", "2", "3"],
+        )
+        runner = MetricRunner(
+            metrics=[metric], store=reading_store,
+            request_service=request_service, queue=queue,
+            config_dir=Path("/tmp"),
+        )
+        runner._fire_due_surveys(datetime.now(timezone.utc))
+        req = request_service.store.list_requests(type=RequestType.SURVEY)[0]
+        request_service.store.answer(req.id, "not a number")
+
+        runner._process_answered_surveys()
+        assert len(reading_store.list_readings("test_survey")) == 0
+
+    def test_empty_answer_skipped(self, reading_store, request_service, queue) -> None:
+        """Empty survey answer produces no reading."""
+        metric = SurveyMetric(
+            name="test_survey", type=MetricType.SURVEY,
+            description="", unit="score_1_5", tags=[], schedule="* * * * *",
+            survey_summary="Rate?", survey_options=["1", "2", "3"],
+        )
+        runner = MetricRunner(
+            metrics=[metric], store=reading_store,
+            request_service=request_service, queue=queue,
+            config_dir=Path("/tmp"),
+        )
+        runner._fire_due_surveys(datetime.now(timezone.utc))
+        req = request_service.store.list_requests(type=RequestType.SURVEY)[0]
+        request_service.store.answer(req.id, "")
+
+        runner._process_answered_surveys()
+        assert len(reading_store.list_readings("test_survey")) == 0
+
+    def test_float_answer_accepted(self, reading_store, request_service, queue) -> None:
+        """Survey answer like '3.5' should be accepted as a float."""
+        metric = SurveyMetric(
+            name="test_survey", type=MetricType.SURVEY,
+            description="", unit="score_1_5", tags=[], schedule="* * * * *",
+            survey_summary="Rate?", survey_options=["1", "2", "3", "4", "5"],
+        )
+        runner = MetricRunner(
+            metrics=[metric], store=reading_store,
+            request_service=request_service, queue=queue,
+            config_dir=Path("/tmp"),
+        )
+        runner._fire_due_surveys(datetime.now(timezone.utc))
+        req = request_service.store.list_requests(type=RequestType.SURVEY)[0]
+        request_service.store.answer(req.id, "3.5")
+
+        runner._process_answered_surveys()
+        readings = reading_store.list_readings("test_survey")
+        assert len(readings) == 1
+        assert readings[0].value == 3.5
+
+
 class TestIntelligentDispatch:
     def test_dispatch_publishes_to_channel(self, reading_store, request_service, queue) -> None:
         metric = IntelligentMetric(
