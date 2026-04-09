@@ -113,4 +113,7 @@ scenarios:
       - type: memory_committed
       - type: event_published
         channel: thoughts
+      - type: deterministic
+        path: defaults/evals/scripts/check-metric-proposal-published.sh
+        threshold: 0.5
       - type: no_errors
