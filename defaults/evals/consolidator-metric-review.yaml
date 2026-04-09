@@ -32,6 +32,44 @@ scenarios:
           last_scan: "2026-04-08T00:00:00Z"
           ---
 
+      - path: memory/knowledge/user/preferences/task-execution-style.md
+        content: |
+          ---
+          title: Executor skips user preference checks
+          confidence: 0.6
+          last_confirmed: 2026-04-05
+          ---
+          The executor routine does not consult knowledge/user/ entries before
+          executing tasks with subjective quality criteria. This was noted in
+          3 recent sessions where the executor used default approaches.
+
+          **Evidence:**
+          - 2026-04-03 executor session: completed task without checking preferences
+          - 2026-04-05 executor session: user corrected output format post-hoc
+
+      - path: memory/sessions/2026-04-06/eval-executor-correction.md
+        content: |
+          ---
+          title: "Executor session — user corrected output approach"
+          routine: session-summarizer
+          instance: executor
+          session_id: eval-session-002
+          started: 2026-04-06T14:00:00Z
+          ended: 2026-04-06T14:30:00Z
+          ---
+
+          ## Summary
+
+          User requested a progress report on weekly goals. The executor
+          produced a generic summary without referencing the user's
+          constitutional goals or priorities. User had to manually redirect.
+
+          ## Preference Signals
+
+          - **Explicit correction (confidence: explicit):** User said "Always
+            reference my constitution goals when assessing progress. Don't
+            give me a generic summary."
+
     seed_readings:
       - metric_name: goal_progress_estimate
         value: 0.7
@@ -73,4 +111,6 @@ scenarios:
         routine: memory-consolidator
         status: completed
       - type: memory_committed
+      - type: event_published
+        channel: thoughts
       - type: no_errors
