@@ -16,7 +16,7 @@ Perform these checks:
 
 5. **Constitution integrity**: Check that the constitution has not been modified by unauthorized routines:
    ```bash
-   cd "$CAMBIUM_CONFIG_DIR" && git log --oneline -5 -- constitution.md
+   cd "$CAMBIUM_DATA_DIR" && git log --oneline -5 -- constitution.md
    ```
    Review recent commits touching `constitution.md`. If any commit was made by a session that is NOT an interlocutor session, report it as **critical** — only the interlocutor (with user approval) should modify the constitution.
 

@@ -12,7 +12,7 @@ For each metric name in the list:
 
 1. Look up the metric definition: `GET $CAMBIUM_API_URL/metrics/{name}`
 2. Read the context needed for assessment. What context to read depends on the metric's tags and description:
-   - **alignment/goals**: Read the constitution (`cat $CAMBIUM_CONFIG_DIR/constitution.md`), recent work items (`GET $CAMBIUM_API_URL/work-items?limit=20`), and recent episodes
+   - **alignment/goals**: Read the constitution (`cat $CAMBIUM_DATA_DIR/constitution.md`), recent work items (`GET $CAMBIUM_API_URL/work-items?limit=20`), and recent episodes
    - **health**: Check queue status (`GET $CAMBIUM_API_URL/queue/status`), recent episodes
    - **wellbeing**: Read recent preference beliefs, session activity patterns
 3. Produce a numeric value within the metric's unit range and a brief explanation

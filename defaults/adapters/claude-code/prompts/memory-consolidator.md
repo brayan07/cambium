@@ -77,7 +77,7 @@ Broader review (runs Monday 6:00 AM UTC).
 ### Constitution Review (weekly only)
 
 Compare revealed preferences against the constitution:
-`cat "$CAMBIUM_CONFIG_DIR/constitution.md"`
+`cat "$CAMBIUM_DATA_DIR/constitution.md"`
 
 If behavior consistently diverges from a stated value, publish a thought:
 "Your constitution says X, but recent sessions suggest Y. Worth revisiting?"
@@ -228,7 +228,7 @@ Use the structured proposal format from `references/detection.md`. Include metri
 
 Before publishing any metric-driven proposal, apply these checks:
 
-1. **Constitution veto**: Re-read `$CAMBIUM_CONFIG_DIR/constitution.md`. If the proposed change optimizes a metric at the expense of a stated value, do NOT publish it. Record the tension as a belief instead.
+1. **Constitution veto**: Re-read `$CAMBIUM_DATA_DIR/constitution.md`. If the proposed change optimizes a metric at the expense of a stated value, do NOT publish it. Record the tension as a belief instead.
 
 2. **Survey metrics are ground truth**: If a deterministic or intelligent metric improves but a survey metric declines, the survey wins. Never propose a change that optimizes a proxy metric at the expense of user self-reports.
 
