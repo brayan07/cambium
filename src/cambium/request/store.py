@@ -117,6 +117,7 @@ class RequestStore:
     def list_requests(
         self,
         status: RequestStatus | None = None,
+        type: RequestType | None = None,
         session_id: str | None = None,
         created_by: str | None = None,
         limit: int = 50,
@@ -126,6 +127,9 @@ class RequestStore:
         if status is not None:
             conditions.append("status = ?")
             params.append(status.value)
+        if type is not None:
+            conditions.append("type = ?")
+            params.append(type.value)
         if session_id is not None:
             conditions.append("session_id = ?")
             params.append(session_id)
@@ -210,12 +214,16 @@ class RequestStore:
             raise
 
     def expire_overdue(self) -> int:
-        """Expire overdue PREFERENCE requests. Returns count expired."""
+        """Expire overdue PREFERENCE and SURVEY requests. Returns count expired."""
         now = datetime.now(timezone.utc)
         rows = self._conn.execute(
             f"SELECT {self._COLS} FROM requests "
-            "WHERE status = ? AND type = ? AND timeout_hours IS NOT NULL",
-            (RequestStatus.PENDING.value, RequestType.PREFERENCE.value),
+            "WHERE status = ? AND type IN (?, ?) AND timeout_hours IS NOT NULL",
+            (
+                RequestStatus.PENDING.value,
+                RequestType.PREFERENCE.value,
+                RequestType.SURVEY.value,
+            ),
         ).fetchall()
 
         count = 0

@@ -10,13 +10,14 @@ INSTANCES_DIR = Path(__file__).parent.parent / "defaults" / "adapters" / "claude
 EXPECTED_ROUTINES = [
     "coordinator", "planner", "executor", "reviewer",
     "interlocutor", "session-summarizer", "sentry", "memory-consolidator",
+    "metric-analyst", "metric-analyst-heavy",
 ]
 
 
 class TestSeedlingRoutines:
     def test_all_routines_parse(self) -> None:
         registry = RoutineRegistry(ROUTINES_DIR)
-        assert len(registry.all()) == 8
+        assert len(registry.all()) == 10
 
     def test_expected_names(self) -> None:
         registry = RoutineRegistry(ROUTINES_DIR)
@@ -64,7 +65,7 @@ class TestSeedlingRoutines:
         for r in registry.all():
             all_published.update(r.publish)
         # External/system-consumed channels don't need internal listeners
-        external = {"schedule", "thoughts", "input_needed"}
+        external = {"schedule", "thoughts", "input_needed", "metric_readings"}
         internal_published = all_published - external
         unhandled = internal_published - all_listened
         assert not unhandled, f"Published channels with no listener: {unhandled}"

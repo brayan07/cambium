@@ -16,7 +16,7 @@ Perform these checks:
 
 5. **Constitution integrity**: Check that the constitution has not been modified by unauthorized routines:
    ```bash
-   cd "$CAMBIUM_CONFIG_DIR" && git log --oneline -5 -- constitution.md
+   cd "$CAMBIUM_DATA_DIR" && git log --oneline -5 -- constitution.md
    ```
    Review recent commits touching `constitution.md`. If any commit was made by a session that is NOT an interlocutor session, report it as **critical** — only the interlocutor (with user approval) should modify the constitution.
 
@@ -48,6 +48,16 @@ curl -s -X POST "$CAMBIUM_API_URL/channels/thoughts/publish" \
 - Normal operation — no news is good news
 - Single transient failures — only report patterns (2+ failures in the window)
 - Your own health checks — don't publish "everything is fine" messages
+
+## Metric Review
+
+After health checks, review metric trends:
+
+1. **Recent readings**: `GET $CAMBIUM_API_URL/metrics` to list all metrics, then `GET $CAMBIUM_API_URL/metrics/{name}/summary?since={7_days_ago}` for each
+2. **Trend analysis**: Flag declining trends (3+ consecutive drops), anomalies, or metrics with zero readings in their expected window
+3. **Missing readings**: If a metric's schedule suggests it should have fired but has no recent readings, flag as a potential runner issue
+
+Note: You do NOT execute or produce metrics. The metric runner handles scheduling and execution. Intelligent metrics are produced by the metric-analyst routine. You only consume readings for anomaly detection.
 
 ## Self-Improvement Detection
 

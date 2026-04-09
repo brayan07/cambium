@@ -1,0 +1,5 @@
+name: metric-analyst-heavy
+adapter_instance: metric-analyst-heavy
+listen: [metric_collect]
+publish: [metric_readings]
+max_concurrency: 1

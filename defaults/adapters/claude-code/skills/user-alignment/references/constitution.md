@@ -1,7 +1,7 @@
 # Constitution Reference
 
 The constitution is the user's explicit statement of goals, values, projects,
-and working style. It lives at `$CAMBIUM_CONFIG_DIR/constitution.md`.
+and working style. It lives at `$CAMBIUM_DATA_DIR/constitution.md`.
 
 ## When to read
 

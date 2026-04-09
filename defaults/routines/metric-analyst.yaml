@@ -1,0 +1,5 @@
+name: metric-analyst
+adapter_instance: metric-analyst
+listen: [metric_collect]
+publish: [metric_readings]
+max_concurrency: 1

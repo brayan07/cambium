@@ -75,6 +75,17 @@ class SeedRequest:
 
 
 @dataclass
+class SeedReading:
+    """A metric reading to pre-seed via the /metrics/seed endpoint."""
+
+    metric_name: str
+    value: float
+    detail: str = ""
+    source: str = "seed"
+    recorded_at: str | None = None
+
+
+@dataclass
 class Scenario:
     """A single test scenario: inject, wait, assert."""
 
@@ -84,6 +95,7 @@ class Scenario:
     assertions: list[Assertion]
     seed_data: list[SeedFile] = field(default_factory=list)
     seed_requests: list[SeedRequest] = field(default_factory=list)
+    seed_readings: list[SeedReading] = field(default_factory=list)
 
 
 @dataclass
@@ -225,6 +237,22 @@ def _parse_seed_requests(raw: list[dict] | None) -> list[SeedRequest]:
     ]
 
 
+def _parse_seed_readings(raw: list[dict] | None) -> list[SeedReading]:
+    """Parse seed_readings field from YAML."""
+    if not raw:
+        return []
+    return [
+        SeedReading(
+            metric_name=item["metric_name"],
+            value=item["value"],
+            detail=item.get("detail", ""),
+            source=item.get("source", "seed"),
+            recorded_at=item.get("recorded_at"),
+        )
+        for item in raw
+    ]
+
+
 def _parse_scenario(raw: dict) -> Scenario:
     """Parse a single scenario from YAML."""
     return Scenario(
@@ -234,6 +262,7 @@ def _parse_scenario(raw: dict) -> Scenario:
         assertions=[_parse_assertion(a) for a in raw.get("assertions", [])],
         seed_data=_parse_seed_data(raw.get("seed_data")),
         seed_requests=_parse_seed_requests(raw.get("seed_requests")),
+        seed_readings=_parse_seed_readings(raw.get("seed_readings")),
     )
 
 

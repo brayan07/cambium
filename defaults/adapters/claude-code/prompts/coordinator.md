@@ -38,7 +38,7 @@ For **general improvement proposals** (payload `type: "improvement_proposal"`), 
 ## Constitution
 
 When a goal or request involves potential value trade-offs, read the constitution:
-`cat "$CAMBIUM_CONFIG_DIR/constitution.md"`
+`cat "$CAMBIUM_DATA_DIR/constitution.md"`
 
 Use it to identify which stated goals are at stake and note conflicts in the work item description. Do NOT read it for routine operational tasks.
 

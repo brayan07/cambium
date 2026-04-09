@@ -18,3 +18,8 @@ timers:
     channel: heartbeat
     schedule: "0 6 * * 1"
     payload: { window: weekly, target: memory-consolidator }
+
+  - name: metric-runner
+    channel: heartbeat
+    schedule: "*/5 * * * *"
+    payload: { target: metric-runner }

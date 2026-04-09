@@ -27,7 +27,12 @@ from cambium.runner.routine_runner import RoutineRunner
 from cambium.server.auth import authenticate, verify_session_token
 from cambium.request.service import RequestService
 from cambium.request.store import RequestStore
+from cambium.metric.model import load_metrics
+from cambium.metric.runner import MetricRunner
+from cambium.metric.service import MetricService
+from cambium.metric.store import ReadingStore
 from cambium.server import episodes as episodes_module
+from cambium.server import metrics as metrics_module
 from cambium.server import requests as requests_module
 from cambium.server import sessions as sessions_module
 from cambium.server import work_items as work_items_module
@@ -266,6 +271,29 @@ def build_server(
     request_store = RequestStore(req_db_path)
     request_service = RequestService(store=request_store, queue=queue)
 
+    # Metric store + service + runner (separate DB)
+    metric_configs = load_metrics(config_dir / "metrics.yaml")
+    if db_path == ":memory:":
+        metric_db_path = ":memory:"
+    else:
+        metric_db_path = str(Path(db_path).parent / "metrics.db")
+    reading_store = ReadingStore(metric_db_path)
+    metric_service = MetricService(store=reading_store, queue=queue, metrics=metric_configs)
+    metric_runner = MetricRunner(
+        metrics=metric_configs,
+        store=reading_store,
+        request_service=request_service,
+        queue=queue,
+        config_dir=config_dir,
+        api_base_url=api_base_url,
+    )
+
+    # Startup reconciliation: log orphaned readings
+    known_names = {m.name for m in metric_configs}
+    orphans = reading_store.get_orphaned_metric_names(known_names)
+    if orphans:
+        log.warning("Orphaned metric readings (no config): %s", orphans)
+
     # Configure episode endpoints
     episodes_module.configure(episode_store=episode_store)
 
@@ -274,6 +302,9 @@ def build_server(
 
     # Configure request endpoints
     requests_module.configure(service=request_service)
+
+    # Configure metric endpoints
+    metrics_module.configure(service=metric_service)
 
     # Configure session endpoints
     sessions_module.configure(
@@ -293,6 +324,7 @@ def build_server(
         live=live,
         request_service=request_service,
         session_store=session_store,
+        metric_runner=metric_runner,
     )
 
     # Set module-level episode store for publish endpoint event recording
@@ -347,6 +379,7 @@ app = FastAPI(
 )
 
 app.include_router(episodes_module.router)
+app.include_router(metrics_module.router)
 app.include_router(requests_module.router)
 app.include_router(sessions_module.router)
 app.include_router(work_items_module.router)

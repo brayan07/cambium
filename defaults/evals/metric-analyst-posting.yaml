@@ -1,0 +1,40 @@
+# Eval: Metric analyst posts readings when dispatched
+#
+# Tests that the metric-analyst routine receives a metric_collect message,
+# reads available context, and posts a reading via the metrics API for the
+# goal_progress_estimate metric. Even with limited context in staging, the
+# analyst should post a reading (0.5 with gap explanation per prompt).
+#
+# Trigger: metric_collect message targeting metric-analyst-heavy
+# Assert: episode completes, reading posted with value in 0-1 range
+#
+# Cost: ~$0.10 per trial (sonnet overridden to haiku for eval)
+name: metric-analyst-posting
+trials: 1
+timeout: 120
+
+config_override:
+  adapters/claude-code/instances/metric-analyst-heavy.yaml:
+    config:
+      model: haiku
+
+scenarios:
+  - name: analyst-posts-goal-progress-reading
+    inject:
+      - channel: metric_collect
+        payload:
+          target: metric-analyst-heavy
+          metrics:
+            - goal_progress_estimate
+
+    wait:
+      routine_completed: metric-analyst-heavy
+
+    assertions:
+      - type: episode
+        routine: metric-analyst-heavy
+        status: completed
+      - type: deterministic
+        path: defaults/evals/scripts/check-metric-reading-posted.sh
+        threshold: 0.5
+      - type: no_errors

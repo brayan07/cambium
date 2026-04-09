@@ -1,0 +1,36 @@
+# Eval: Sentry reviews metrics during health check
+#
+# Tests that the sentry's metric review section is functional — the sentry
+# queries the metrics API and incorporates metric status into its health check.
+# With a fresh staging environment (no readings), the sentry should note the
+# absence or at least query the metrics endpoint without errors.
+#
+# Trigger: heartbeat (sentry 5-min check)
+# Assert: sentry completes without errors
+#
+# Cost: ~$0.05 per trial (haiku sentry)
+name: sentry-metric-review
+trials: 1
+timeout: 120
+
+config_override:
+  adapters/claude-code/instances/sentry.yaml:
+    config:
+      model: haiku
+
+scenarios:
+  - name: sentry-queries-metrics-endpoint
+    inject:
+      - channel: heartbeat
+        payload:
+          window: micro
+          target: sentry
+
+    wait:
+      routine_completed: sentry
+
+    assertions:
+      - type: episode
+        routine: sentry
+        status: completed
+      - type: no_errors
