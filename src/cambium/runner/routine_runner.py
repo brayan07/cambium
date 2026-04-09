@@ -178,6 +178,20 @@ class RoutineRunner:
                 )
             )
 
+        # Persist token usage to session metadata (accumulate across turns)
+        if self.session_store and result.usage is not None:
+            existing = self.session_store.get_session(session_id)
+            prev = existing.metadata.get("usage", {}) if existing else {}
+            accumulated = {
+                "input_tokens": prev.get("input_tokens", 0) + result.usage.input_tokens,
+                "output_tokens": prev.get("output_tokens", 0) + result.usage.output_tokens,
+                "cache_read_tokens": prev.get("cache_read_tokens", 0) + result.usage.cache_read_tokens,
+                "cache_creation_tokens": prev.get("cache_creation_tokens", 0) + result.usage.cache_creation_tokens,
+                "cost_usd": round(prev.get("cost_usd", 0.0) + result.usage.cost_usd, 6),
+                "duration_ms": prev.get("duration_ms", 0) + int(result.duration_seconds * 1000),
+            }
+            self.session_store.update_metadata(session_id, {"usage": accumulated})
+
         # Update session status
         if self.session_store:
             status = SessionStatus.COMPLETED if result.success else SessionStatus.FAILED

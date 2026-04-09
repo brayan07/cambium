@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from cambium.adapters.base import AdapterInstance, AdapterInstanceRegistry, AdapterType, RunResult
+from cambium.adapters.base import AdapterInstance, AdapterInstanceRegistry, AdapterType, RunResult, Usage
 from cambium.models.message import Message
 from cambium.models.routine import Routine
 from cambium.runner.routine_runner import RoutineRunner
@@ -11,8 +11,9 @@ from cambium.runner.routine_runner import RoutineRunner
 class FakeAdapter(AdapterType):
     name = "fake"
 
-    def __init__(self):
+    def __init__(self, usage: Usage | None = None):
         self.last_call = None
+        self._usage = usage
 
     def send_message(self, instance, user_message, session_id, session_token="",
                      api_base_url="", live=True, on_event=None, on_raw_event=None,
@@ -27,7 +28,7 @@ class FakeAdapter(AdapterType):
             "resume": resume,
         }
         return RunResult(success=True, output=f"[fake] ran {instance.name}",
-                         session_id=session_id)
+                         session_id=session_id, usage=self._usage)
 
 
 class TestRoutineRunner:
@@ -236,3 +237,80 @@ class TestRoutineRunner:
         result = runner.send_message(routine, msg, session_id="existing-session-id")
         assert result.success is True
         assert adapter.last_call["session_id"] == "existing-session-id"
+
+
+class TestUsagePersistence:
+    """Tests for token usage tracking through the runner → session metadata pipeline."""
+
+    def _make_runner_with_store(self, tmp_path: Path, usage: Usage | None = None):
+        from cambium.session.store import SessionStore
+
+        inst_dir = tmp_path / "instances"
+        inst_dir.mkdir()
+        (inst_dir / "coordinator.yaml").write_text(
+            "name: coordinator\nadapter_type: fake\nconfig:\n  model: haiku\n"
+        )
+        adapter = FakeAdapter(usage=usage)
+        instance_reg = AdapterInstanceRegistry(inst_dir)
+        store = SessionStore()
+        runner = RoutineRunner(
+            adapter_types={"fake": adapter},
+            instance_registry=instance_reg,
+        )
+        runner.session_store = store
+        return runner, adapter, store
+
+    def test_usage_persisted_to_session_metadata(self, tmp_path: Path):
+        usage = Usage(input_tokens=1000, output_tokens=500, cache_read_tokens=200,
+                      cache_creation_tokens=50, cost_usd=0.042)
+        runner, _, store = self._make_runner_with_store(tmp_path, usage=usage)
+
+        routine = Routine(name="coordinator", adapter_instance="coordinator", listen=["events"])
+        msg = Message.create(channel="events", payload={"test": True}, source="test")
+
+        result = runner.send_message(routine, msg)
+        assert result.success is True
+
+        session = store.get_session(result.session_id)
+        assert session is not None
+        u = session.metadata["usage"]
+        assert u["input_tokens"] == 1000
+        assert u["output_tokens"] == 500
+        assert u["cache_read_tokens"] == 200
+        assert u["cache_creation_tokens"] == 50
+        assert u["cost_usd"] == 0.042
+
+    def test_usage_accumulates_across_turns(self, tmp_path: Path):
+        usage = Usage(input_tokens=1000, output_tokens=500, cost_usd=0.05)
+        runner, _, store = self._make_runner_with_store(tmp_path, usage=usage)
+
+        routine = Routine(name="coordinator", adapter_instance="coordinator", listen=["events"])
+        msg = Message.create(channel="events", payload={"test": True}, source="test")
+
+        # First invocation creates the session
+        result1 = runner.send_message(routine, msg)
+        session_id = result1.session_id
+
+        # Second invocation on the same session
+        result2 = runner.send_message(
+            routine, session_id=session_id, user_message="follow-up",
+        )
+        assert result2.success is True
+
+        session = store.get_session(session_id)
+        u = session.metadata["usage"]
+        assert u["input_tokens"] == 2000
+        assert u["output_tokens"] == 1000
+        assert u["cost_usd"] == 0.1
+
+    def test_none_usage_skips_metadata_update(self, tmp_path: Path):
+        runner, _, store = self._make_runner_with_store(tmp_path, usage=None)
+
+        routine = Routine(name="coordinator", adapter_instance="coordinator", listen=["events"])
+        msg = Message.create(channel="events", payload={"test": True}, source="test")
+
+        result = runner.send_message(routine, msg)
+        assert result.success is True
+
+        session = store.get_session(result.session_id)
+        assert "usage" not in session.metadata

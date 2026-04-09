@@ -58,3 +58,19 @@ metrics:
     tags: [health, self-improvement, meta]
     schedule: "0 6 1,15 * *"
     instance: metric-analyst-heavy
+
+  - name: daily_token_usage
+    type: deterministic
+    description: "Total input + output tokens consumed across all sessions in the past 24 hours"
+    unit: tokens
+    tags: [cost, usage]
+    script_path: metrics/scripts/daily-token-usage.sh
+    schedule: "0 0 * * *"
+
+  - name: daily_cost_usd
+    type: deterministic
+    description: "Total USD cost across all sessions in the past 24 hours"
+    unit: usd
+    tags: [cost, usage]
+    script_path: metrics/scripts/daily-cost-usd.sh
+    schedule: "0 0 * * *"

@@ -156,7 +156,7 @@ class TestDefaultMetricsYaml:
     def test_loads_successfully(self) -> None:
         path = Path(__file__).parent.parent / "defaults" / "metrics.yaml"
         metrics = load_metrics(path)
-        assert len(metrics) == 7
+        assert len(metrics) == 9
 
     def test_all_have_schedules(self) -> None:
         path = Path(__file__).parent.parent / "defaults" / "metrics.yaml"
