@@ -56,6 +56,11 @@ class SummaryRequest(BaseModel):
     summary: str
 
 
+class SummarizerAckRequest(BaseModel):
+    session_id: str
+    digest_path: str
+
+
 # --- Helpers ---
 
 
@@ -132,6 +137,28 @@ def post_summary(
         raise HTTPException(status_code=404, detail="No episode found for this session")
 
     store.acknowledge_session(session_id, body.summary)
+    return _episode_to_response(store.get_episode(ep.id))
+
+
+@router.post("/episodes/summarizer-ack", response_model=EpisodeResponse)
+def post_summarizer_ack(
+    body: SummarizerAckRequest,
+    authorization: str | None = Header(default=None),
+):
+    """Mark an episode as acknowledged by the summarizer, with digest path."""
+    store = _get_store()
+
+    if authorization is None:
+        raise HTTPException(status_code=401, detail="Authorization required")
+
+    token = authorization.removeprefix("Bearer ").strip()
+    verify_session_token(token)
+
+    ep = store.get_episode_by_session(body.session_id)
+    if ep is None:
+        raise HTTPException(status_code=404, detail="No episode found for this session")
+
+    store.acknowledge_summarizer(body.session_id, body.digest_path)
     return _episode_to_response(store.get_episode(ep.id))
 
 

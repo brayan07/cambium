@@ -136,6 +136,72 @@ class TestPostSummary:
         assert resp.status_code == 404
 
 
+class TestSummarizerAck:
+    def test_summarizer_ack(self, client: TestClient, episode_store: EpisodeStore):
+        """Summarizer-ack sets summarizer_acknowledged and digest_path on the target episode."""
+        ep = Episode.create(session_id="target-sess", routine="coordinator")
+        episode_store.create_episode(ep)
+
+        # The summarizer uses its own JWT — not the target session's
+        token = create_session_token("session-summarizer", "summarizer-sess")
+        resp = client.post(
+            "/episodes/summarizer-ack",
+            json={"session_id": "target-sess", "digest_path": "sessions/2026-04-08/target-s.md"},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["summarizer_acknowledged"] is True
+        assert data["digest_path"] == "sessions/2026-04-08/target-s.md"
+        # session_acknowledged should remain untouched
+        assert data["session_acknowledged"] is False
+
+    def test_summarizer_ack_requires_auth(self, client: TestClient):
+        resp = client.post(
+            "/episodes/summarizer-ack",
+            json={"session_id": "s1", "digest_path": "x.md"},
+        )
+        assert resp.status_code == 401
+
+    def test_summarizer_ack_no_episode(self, client: TestClient):
+        token = create_session_token("session-summarizer", "summarizer-sess")
+        resp = client.post(
+            "/episodes/summarizer-ack",
+            json={"session_id": "nonexistent", "digest_path": "x.md"},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert resp.status_code == 404
+
+    def test_summary_and_summarizer_ack_are_independent(self, client: TestClient, episode_store: EpisodeStore):
+        """Self-acknowledgment and summarizer-acknowledgment are separate fields."""
+        ep = Episode.create(session_id="dual-sess", routine="executor")
+        episode_store.create_episode(ep)
+
+        # Routine self-acknowledges
+        own_token = create_session_token("executor", "dual-sess")
+        resp1 = client.post(
+            "/episodes/summary",
+            json={"summary": "Executed task."},
+            headers={"Authorization": f"Bearer {own_token}"},
+        )
+        assert resp1.status_code == 200
+        assert resp1.json()["session_acknowledged"] is True
+        assert resp1.json()["summarizer_acknowledged"] is False
+
+        # Summarizer acknowledges the same episode
+        summ_token = create_session_token("session-summarizer", "summ-sess")
+        resp2 = client.post(
+            "/episodes/summarizer-ack",
+            json={"session_id": "dual-sess", "digest_path": "sessions/2026-04-08/dual-ses.md"},
+            headers={"Authorization": f"Bearer {summ_token}"},
+        )
+        assert resp2.status_code == 200
+        assert resp2.json()["session_acknowledged"] is True
+        assert resp2.json()["summarizer_acknowledged"] is True
+        assert resp2.json()["session_summary"] == "Executed task."
+        assert resp2.json()["digest_path"] == "sessions/2026-04-08/dual-ses.md"
+
+
 class TestEventEndpoints:
     def test_send_records_event(self, client: TestClient, episode_store: EpisodeStore):
         """External send to a channel should record a ChannelEvent."""

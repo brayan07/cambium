@@ -300,6 +300,19 @@ curl -s -X POST "$CAMBIUM_API_URL/episodes/summary" \
 
 This uses your JWT to identify the session and marks the episode as self-acknowledged.
 
+### Marking an episode as summarized
+
+The session-summarizer uses this to acknowledge the *target* episode it digested (distinct from self-acknowledgment above):
+
+```bash
+curl -s -X POST "$CAMBIUM_API_URL/episodes/summarizer-ack" \
+  -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer $CAMBIUM_TOKEN" \
+  -d '{"session_id": "<target_session_id>", "digest_path": "sessions/2026-04-08/a1b2c3d4.md"}'
+```
+
+This sets `summarizer_acknowledged=true` and records the `digest_path` on the target episode. Requires JWT auth (any valid session token).
+
 ### Querying channel events
 
 ```bash
