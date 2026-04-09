@@ -57,8 +57,22 @@ End-of-cycle rollup (runs at 6:00 AM UTC).
    - {list of knowledge entries created or modified}
    ```
 4. Review knowledge entries that were modified today — are confidence levels appropriate?
-5. Update `last_daily_digest` in consolidator state
-6. Commit
+5. **Metric triage** — check for critical declines that shouldn't wait for the weekly review:
+   ```bash
+   METRICS=$(curl -s "$CAMBIUM_API_URL/metrics")
+   # For each metric, fetch the summary
+   curl -s "$CAMBIUM_API_URL/metrics/{name}/summary?since=$(date -u -v-7d +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d '7 days ago' +%Y-%m-%dT%H:%M:%SZ)"
+   ```
+   Flag as **critical** and publish immediately to `thoughts` if:
+   - `request_answer_rate` drops below **0.5** (system is losing half its requests)
+   - A survey metric (`weekly_productivity_rating`, `weekly_alignment_rating`) drops **2+ points** from its prior reading
+   - `goal_progress_estimate` drops below **0.3** (significant goal regression)
+
+   For critical alerts, publish a `health_observation` to `thoughts` with severity `warning` and include the metric name, current value, and prior value. Do NOT attempt full correlation or propose specific file changes — that's the weekly review's job. The daily triage is an early warning, not a diagnosis.
+
+   If no metric is critical, skip this step silently.
+6. Update `last_daily_digest` in consolidator state
+7. Commit
 
 #### window: "weekly"
 Broader review (runs Monday 6:00 AM UTC).
