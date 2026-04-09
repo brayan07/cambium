@@ -42,3 +42,19 @@ metrics:
     tags: [alignment, goals]
     schedule: "0 6 * * *"
     instance: metric-analyst-heavy
+
+  - name: improvement_success_rate
+    type: deterministic
+    description: "Ratio of accepted to total (accepted + rejected) self-improvement work items in past 30 days"
+    unit: ratio
+    tags: [health, self-improvement]
+    script_path: metrics/scripts/improvement-success-rate.sh
+    schedule: "0 6 * * 1"
+
+  - name: belief_accuracy_rate
+    type: intelligent
+    description: "Metric-analyst's estimate of how often metric-informed beliefs correctly predicted outcomes"
+    unit: score_0_1
+    tags: [health, self-improvement, meta]
+    schedule: "0 6 1,15 * *"
+    instance: metric-analyst-heavy

@@ -46,10 +46,10 @@ class StagingContext:
         with urllib.request.urlopen(req, timeout=30) as resp:
             return json.loads(resp.read())
 
-    def post(self, path: str, payload: dict | None = None) -> Any:
+    def post(self, path: str, payload: Any = None) -> Any:
         """HTTP POST against the staging server."""
         url = f"{self.api_url}{path}"
-        body = json.dumps(payload or {}).encode()
+        body = json.dumps(payload if payload is not None else {}).encode()
         req = urllib.request.Request(
             url, data=body, headers={"Content-Type": "application/json"},
         )

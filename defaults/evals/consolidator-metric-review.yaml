@@ -1,0 +1,76 @@
+# Eval: Consolidator performs metric-informed review during weekly window
+#
+# Seeds declining metric readings for goal_progress_estimate, then triggers
+# a weekly consolidator heartbeat. The consolidator should:
+# 1. Fetch metric data via API
+# 2. Detect the declining trend
+# 3. Create a belief in knowledge/metrics/ and/or publish a thought
+#
+# The seed_data pre-populates the consolidator state so it doesn't get stuck
+# on missing checkpoints. The seed_readings use the /metrics/seed endpoint
+# to inject a declining trend.
+#
+# Cost: ~$0.50 per trial (sonnet consolidator)
+name: consolidator-metric-review
+trials: 1
+timeout: 300
+
+config_override:
+  adapters/claude-code/instances/memory-consolidator.yaml:
+    config:
+      model: sonnet
+
+scenarios:
+  - name: consolidator-detects-declining-metric
+    seed_data:
+      - path: memory/.consolidator-state.md
+        content: |
+          ---
+          last_session_processed: null
+          last_daily_digest: "2026-04-07"
+          last_weekly_digest: "2026-03-31"
+          last_scan: "2026-04-08T00:00:00Z"
+          ---
+
+    seed_readings:
+      - metric_name: goal_progress_estimate
+        value: 0.7
+        detail: "Strong progress — 4 of 5 goals on track"
+        source: metric-analyst
+        recorded_at: "2026-03-25T06:00:00Z"
+      - metric_name: goal_progress_estimate
+        value: 0.6
+        detail: "Moderate progress — 3 of 5 goals on track"
+        source: metric-analyst
+        recorded_at: "2026-03-28T06:00:00Z"
+      - metric_name: goal_progress_estimate
+        value: 0.45
+        detail: "Below average — 2 of 5 goals on track, energy flagging"
+        source: metric-analyst
+        recorded_at: "2026-04-01T06:00:00Z"
+      - metric_name: goal_progress_estimate
+        value: 0.35
+        detail: "Declining — 1 of 5 goals on track"
+        source: metric-analyst
+        recorded_at: "2026-04-04T06:00:00Z"
+      - metric_name: goal_progress_estimate
+        value: 0.25
+        detail: "Low — limited progress this week"
+        source: metric-analyst
+        recorded_at: "2026-04-07T06:00:00Z"
+
+    inject:
+      - channel: heartbeat
+        payload:
+          window: weekly
+          target: memory-consolidator
+
+    wait:
+      routine_completed: memory-consolidator
+
+    assertions:
+      - type: episode
+        routine: memory-consolidator
+        status: completed
+      - type: memory_committed
+      - type: no_errors

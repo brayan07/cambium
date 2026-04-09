@@ -96,6 +96,10 @@ class EvalRunner:
                 if scenario.seed_requests:
                     self._seed_requests(ctx, scenario.seed_requests)
 
+                # Seed metric readings
+                if scenario.seed_readings:
+                    self._seed_readings(ctx, scenario.seed_readings)
+
                 # Inject messages
                 for injection in scenario.inject:
                     if injection.delay > 0:
@@ -172,6 +176,21 @@ class EvalRunner:
                 payload["timeout_hours"] = sr.timeout_hours
             ctx.post("/requests/seed", payload)
             log.debug(f"    Seeded request: {sr.summary}")
+
+    def _seed_readings(self, ctx: StagingContext, seed_readings) -> None:
+        """Seed metric readings into the staging DB via the /metrics/seed endpoint."""
+        payload = [
+            {
+                "metric_name": sr.metric_name,
+                "value": sr.value,
+                "detail": sr.detail,
+                "source": sr.source,
+                **({"recorded_at": sr.recorded_at} if sr.recorded_at else {}),
+            }
+            for sr in seed_readings
+        ]
+        ctx.post("/metrics/seed", payload)
+        log.debug(f"    Seeded {len(seed_readings)} metric reading(s)")
 
     def _wait(self, ctx: StagingContext, wait, timeout: int) -> None:
         """Wait for the specified condition."""

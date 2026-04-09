@@ -84,6 +84,163 @@ If behavior consistently diverges from a stated value, publish a thought:
 
 Do NOT modify the constitution — only the interlocutor writes to it with user approval.
 
+### Metric-Informed Review (weekly only)
+
+After the constitution review, analyze metric trends and correlate with recent changes. This is how the system closes the optimization loop — translating measurement into diagnosis and action.
+
+#### Step 1: Fetch metric data
+
+```bash
+# List all metrics
+METRICS=$(curl -s "$CAMBIUM_API_URL/metrics")
+
+# For each metric, fetch summary and recent readings
+# (use 7-day window for summary, 14-day for trend comparison)
+curl -s "$CAMBIUM_API_URL/metrics/{name}/summary?since=$(date -u -v-7d +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d '7 days ago' +%Y-%m-%dT%H:%M:%SZ)"
+curl -s "$CAMBIUM_API_URL/metrics/{name}/readings?limit=10&since=$(date -u -v-14d +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d '14 days ago' +%Y-%m-%dT%H:%M:%SZ)"
+```
+
+#### Step 2: Classify each metric
+
+- **Declining**: 3+ consecutive drops OR latest reading >20% below 14-day average
+- **Improving**: 3+ consecutive rises OR latest reading >20% above 14-day average
+- **Stagnant low**: Average and latest both below midpoint of the unit range (e.g., <0.5 for `score_0_1`, <2.5 for `score_1_5`, <0.5 for `ratio`)
+- **Missing**: Fewer readings than the metric's schedule predicts (e.g., a daily metric with <4 readings in a week)
+- **Stable**: None of the above — no action needed
+
+If a metric has fewer than 3 readings total, classify it as "insufficient data" and skip further analysis.
+
+#### Step 3: Correlate with recent changes
+
+For any declining or improving metric, identify what changed in the same window:
+
+```bash
+# Belief changes
+cd $CAMBIUM_DATA_DIR/memory && git log --oneline --since="7 days ago" -- knowledge/
+
+# Self-improvement PRs
+gh pr list --label self-improvement --state all --limit 10 --json number,title,mergedAt,state 2>/dev/null
+
+# Active work items in the improvement pipeline
+curl -s "$CAMBIUM_API_URL/work-items?status=active"
+```
+
+Assess plausibility: does the change logically affect the metric? A prompt change to the executor plausibly affects `goal_progress_estimate` but not `request_answer_rate`. Only record correlations that pass a basic plausibility check.
+
+#### Step 4: Create or update beliefs
+
+Store metric-informed beliefs in `$CAMBIUM_DATA_DIR/memory/knowledge/metrics/` (create this directory if it doesn't exist).
+
+**Trend beliefs** — one per metric with a notable status (update if exists, don't duplicate):
+
+File: `knowledge/metrics/trend-{metric_name}.md`
+```markdown
+---
+title: "{metric_name}: {status}"
+confidence: 0.5
+last_confirmed: YYYY-MM-DD
+tags: [metric-trend]
+---
+{Description of the trend with specific numbers}
+
+**Possible causes:**
+- {Identified correlations or "No identifiable cause yet"}
+
+**Evidence:**
+- readings: {list of recent values}
+- {correlated changes if any}
+```
+
+**Attribution beliefs** — when a plausible causal link is identified:
+
+File: `knowledge/metrics/attribution-{identifier}.md`
+```markdown
+---
+title: "{change description} affected {metric_name}"
+confidence: 0.4
+last_confirmed: YYYY-MM-DD
+tags: [metric-attribution, self-improvement]
+---
+{Description of the change and its observed effect on the metric}
+
+**Correlation strength:** {temporal only | temporal + content | confirmed}
+
+**Evidence:**
+- {change reference (PR, belief update, etc.)}
+- {metric readings before and after}
+```
+
+Attribution confidence should start low (0.3–0.5) and only increase if:
+- Multiple independent metrics move in the expected direction
+- The metric returns to baseline when the change is reverted
+- The user confirms the causal link
+
+**Validation beliefs** — for completed self-improvement work items with post-deployment metric data:
+
+File: `knowledge/metrics/validation-{work_item_id}.md`
+```markdown
+---
+title: "Self-improvement {id}: {validated|inconclusive|no effect}"
+confidence: 0.5
+last_confirmed: YYYY-MM-DD
+tags: [metric-validation, self-improvement]
+---
+**Before (7 days pre-change):** {metric} avg {value}
+**After (7 days post-change):** {metric} avg {value}
+
+**Verdict:** {Assessment}
+```
+
+#### Step 5: Decide action level
+
+**Propose** (publish to `thoughts` as `self_improvement`) when:
+- A user-facing survey metric (`weekly_productivity_rating`, `weekly_alignment_rating`) shows a declining trend AND you can identify a plausible target file to change
+- A system metric (`request_answer_rate`) drops below a critical threshold (answer rate <0.7, response time >48h) AND the root cause maps to a tunable file
+- `goal_progress_estimate` drops below 0.3 AND you can identify specific routine behavior that correlates
+
+Use the structured proposal format from `references/detection.md`. Include metric evidence in the `evidence` array, prefixed with `metric:`:
+
+```json
+{
+  "type": "self_improvement",
+  "target_file": "adapters/claude-code/prompts/executor.md",
+  "observation": "weekly_alignment_rating declined from 4.2 to 2.8 over 3 weeks",
+  "proposed_change": "Add instruction to check user preferences before executing tasks with subjective criteria",
+  "evidence": [
+    "metric:weekly_alignment_rating readings 4.2→3.5→2.8 (weeks 13-15)",
+    "sessions/2026-04-08/abc.md",
+    "knowledge/metrics/trend-weekly_alignment_rating.md"
+  ]
+}
+```
+
+**Observe only** (create/update belief, no proposal) when:
+- A metric moved but you cannot identify a plausible tunable cause
+- A metric is volatile but not trending (oscillating around its mean)
+- The improvement pipeline already has an active self-improvement work item for the affected area
+- A metric is improving — record as validation evidence, no action needed
+
+**Reinforce** (raise attribution belief confidence) when:
+- A metric improves following a self-improvement change
+- A previously flagged trend reverses after a corrective action
+
+#### Step 6: Anti-gaming safeguards
+
+Before publishing any metric-driven proposal, apply these checks:
+
+1. **Constitution veto**: Re-read `$CAMBIUM_CONFIG_DIR/constitution.md`. If the proposed change optimizes a metric at the expense of a stated value, do NOT publish it. Record the tension as a belief instead.
+
+2. **Survey metrics are ground truth**: If a deterministic or intelligent metric improves but a survey metric declines, the survey wins. Never propose a change that optimizes a proxy metric at the expense of user self-reports.
+
+3. **No self-referential optimization**: Never propose changes to these files based on metric data — they would create a feedback loop:
+   - `adapters/claude-code/prompts/metric-analyst.md`
+   - The sentry's "Metric Review" section
+   - This "Metric-Informed Review" section
+
+4. **Cooldown**: If a self-improvement work item already exists for a metric-related issue (check active work items), do not propose another until the existing one completes and a full measurement cycle has passed.
+
+5. **Minimum evidence**: Never propose action based on fewer than 3 readings. Surveys with 1–2 data points are observations, not trends.
+
 ### Preference Belief Management
 
 During **every scan**, after processing session digests (step 5), check each digest for a **Preference Signals** section. The session-summarizer embeds detected signals directly in the digest — this is the primary transport mechanism. No API polling needed.

@@ -16,15 +16,17 @@ Only propose when:
 
 ## Content-based pattern detection (consolidator)
 
-During consolidation, look for patterns across session digests that suggest a tunable change:
+During consolidation, look for patterns across session digests **and metric trends** that suggest a tunable change:
 
 - User corrections that recur → the relevant prompt may need updating
 - Consistent quality issues in a routine's output → prompt or skill change
 - Repeated failures with the same root cause → config or prompt adjustment
+- **Declining metric with identifiable tunable cause** → prompt, skill, or config change (see `references/metrics.md` for metric-driven proposal format)
+- **Improving metric following a change** → record as validation evidence in `knowledge/metrics/`
 
 Only propose when:
 - Grounded in evidence (not theoretical)
-- Supported by at least 2 independent observations
+- Supported by at least 2 independent observations (session digests or 3+ metric readings)
 - The fix is a change to a prompt, skill, or config parameter (not a code change)
 
 For improvements that require code changes, use `improvement_proposal` type instead.

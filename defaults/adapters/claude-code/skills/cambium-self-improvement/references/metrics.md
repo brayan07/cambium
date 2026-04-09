@@ -47,6 +47,40 @@ When reviewing metric trends:
 - **Improving trend**: Evidence that a recent change is working — note in relevant beliefs
 - **Missing readings**: Check if the metric runner is healthy
 
+## Metric-Driven Self-Improvement Proposals
+
+When proposing a self-improvement change based on metric evidence, include metric data in the `evidence` array with a `metric:` prefix so downstream routines can distinguish metric data from session references:
+
+```json
+{
+  "type": "self_improvement",
+  "target_file": "adapters/claude-code/prompts/executor.md",
+  "observation": "weekly_alignment_rating declined from 4.2 to 2.8 over 3 weeks",
+  "proposed_change": "Add preference-checking step before executing subjective tasks",
+  "evidence": [
+    "metric:weekly_alignment_rating readings 4.2→3.5→2.8 (weeks 13-15)",
+    "knowledge/metrics/trend-weekly_alignment_rating.md",
+    "sessions/2026-04-08/abc.md"
+  ]
+}
+```
+
+**When metric evidence strengthens a proposal:**
+- 3+ readings showing a clear trend (not noise)
+- Temporal correlation with a specific change (belief update, PR merge, config tweak)
+- Corroboration from multiple metrics (e.g., both alignment rating AND goal progress declining)
+
+**When metric evidence is insufficient:**
+- Fewer than 3 readings — observation only, not actionable
+- Volatile readings with no clear direction
+- Single metric moving without corroborating signals
+
+**Target files for metric-driven proposals** (most to least common):
+- Routine prompts: `adapters/claude-code/prompts/*.md`
+- Skills: `adapters/claude-code/skills/*/SKILL.md`
+- Timer config: `timers.yaml` (when metric collection frequency is the issue)
+- Routine config: `routines/*.yaml` (when concurrency or channel routing is the issue)
+
 ## Metric Definitions
 
 Metrics are defined in `defaults/metrics.yaml` — YAML config, not database entries. Routines cannot create new metrics via API. To propose a new metric, file a self-improvement proposal suggesting additions to the YAML config.
