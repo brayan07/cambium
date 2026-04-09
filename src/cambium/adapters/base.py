@@ -17,6 +17,20 @@ from cambium.session.model import TranscriptEvent
 
 
 @dataclass
+class Usage:
+    """Adapter-agnostic token usage from a single invocation.
+
+    All fields default to zero. Adapters populate only what they can report.
+    """
+
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cache_read_tokens: int = 0
+    cache_creation_tokens: int = 0
+    cost_usd: float = 0.0
+
+
+@dataclass
 class RunResult:
     """Outcome of an adapter instance execution."""
 
@@ -25,6 +39,7 @@ class RunResult:
     duration_seconds: float = 0.0
     error: str | None = None
     session_id: str | None = None
+    usage: Usage | None = None
 
 
 @dataclass

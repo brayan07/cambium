@@ -17,7 +17,7 @@ import time
 from pathlib import Path
 from typing import Any, Callable
 
-from cambium.adapters.base import AdapterInstance, AdapterType, RunResult
+from cambium.adapters.base import AdapterInstance, AdapterType, RunResult, Usage
 from cambium.mcp.registry import MCPRegistry
 from cambium.models.skill import SkillRegistry
 from cambium.session.model import TranscriptEvent
@@ -155,6 +155,7 @@ class ClaudeCodeAdapter(AdapterType):
             proc.stdin.close()
 
             last_text = ""
+            usage = None
             chunk_id = f"chatcmpl-{session_id[:12]}"
 
             assert proc.stdout is not None
@@ -175,9 +176,10 @@ class ClaudeCodeAdapter(AdapterType):
                     if on_event:
                         on_event(chunk)
 
-                # Track final text for RunResult
+                # Track final text and usage for RunResult
                 if parsed.get("type") == "result":
                     last_text = parsed.get("result", last_text)
+                    usage = _extract_usage(parsed)
                 elif parsed.get("type") == "assistant" and "message" in parsed:
                     for block in parsed["message"].get("content", []):
                         if isinstance(block, dict) and block.get("type") == "text":
@@ -196,6 +198,7 @@ class ClaudeCodeAdapter(AdapterType):
                     duration_seconds=time.monotonic() - start,
                     error=f"Timed out after {timeout}s",
                     session_id=session_id,
+                    usage=usage,
                 )
 
             duration = time.monotonic() - start
@@ -211,6 +214,7 @@ class ClaudeCodeAdapter(AdapterType):
                     output=last_text,
                     duration_seconds=duration,
                     session_id=session_id,
+                    usage=usage,
                 )
             else:
                 return RunResult(
@@ -219,6 +223,7 @@ class ClaudeCodeAdapter(AdapterType):
                     duration_seconds=duration,
                     error=stderr_text[:500] if stderr_text else f"Exit code {proc.returncode}",
                     session_id=session_id,
+                    usage=usage,
                 )
 
         except FileNotFoundError:
@@ -538,3 +543,23 @@ def _extract_content(event: dict, event_type: str) -> str:
 
     # Catch-all: preserve full event as JSON so nothing is lost
     return json.dumps(event)
+
+
+def _extract_usage(event: dict) -> Usage | None:
+    """Extract token usage from a Claude Code stream-json result event.
+
+    The result event contains:
+      - total_cost_usd (float) at top level
+      - usage.input_tokens, usage.output_tokens,
+        usage.cache_read_input_tokens, usage.cache_creation_input_tokens
+    """
+    if event.get("type") != "result":
+        return None
+    usage_obj = event.get("usage", {})
+    return Usage(
+        input_tokens=usage_obj.get("input_tokens", 0),
+        output_tokens=usage_obj.get("output_tokens", 0),
+        cache_read_tokens=usage_obj.get("cache_read_input_tokens", 0),
+        cache_creation_tokens=usage_obj.get("cache_creation_input_tokens", 0),
+        cost_usd=event.get("total_cost_usd", 0.0) or 0.0,
+    )
