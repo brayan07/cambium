@@ -108,7 +108,7 @@ class MetricRunner:
         for m in self.metrics.values():
             if not isinstance(m, SurveyMetric):
                 continue
-            if not self._is_due(m.name, m.schedule, now):
+            if not self._is_survey_due(m.name, m.schedule, now):
                 continue
             try:
                 request = self.request_service.create_request(
@@ -185,6 +185,21 @@ class MetricRunner:
         if last is None:
             return True  # never run — due immediately
         last_time = datetime.fromisoformat(last.recorded_at)
+        cron = croniter(cron_expr, last_time)
+        next_fire = cron.get_next(datetime)
+        return now >= next_fire
+
+    def _is_survey_due(self, metric_name: str, cron_expr: str, now: datetime) -> bool:
+        """Survey scheduling is anchored on the last *fire* time, not the
+        last reading. Surveys only produce a reading when the user
+        answers, so using readings here re-fires every tick while the
+        survey is pending. We look at survey_requests instead."""
+        if not cron_expr:
+            return False
+        last_fired = self.store.get_latest_survey_fired_at(metric_name)
+        if last_fired is None:
+            return True
+        last_time = datetime.fromisoformat(last_fired)
         cron = croniter(cron_expr, last_time)
         next_fire = cron.get_next(datetime)
         return now >= next_fire
