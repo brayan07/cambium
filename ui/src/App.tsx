@@ -4,6 +4,7 @@ import { Layout } from "./components/Layout";
 import { ChatPage } from "./pages/ChatPage";
 import { InboxPage } from "./pages/InboxPage";
 import { WorkPage } from "./pages/WorkPage";
+import { DashboardPage } from "./pages/DashboardPage";
 import { PlaceholderPage } from "./pages/PlaceholderPage";
 
 const queryClient = new QueryClient({
@@ -25,15 +26,7 @@ export default function App() {
             <Route path="/chat" element={<ChatPage />} />
             <Route path="/inbox" element={<InboxPage />} />
             <Route path="/work" element={<WorkPage />} />
-            <Route
-              path="/dashboard"
-              element={
-                <PlaceholderPage
-                  title="Dashboard"
-                  description="System overview — Phase 4"
-                />
-              }
-            />
+            <Route path="/dashboard" element={<DashboardPage />} />
             <Route
               path="/mind/*"
               element={

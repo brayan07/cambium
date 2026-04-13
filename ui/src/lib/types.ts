@@ -93,3 +93,16 @@ export interface HealthResponse {
   pending_messages: number;
   in_flight_messages: number;
 }
+
+export interface QueueStatus {
+  pending: number;
+  subscribed_channels: string[];
+}
+
+export interface ChannelEvent {
+  id: string;
+  timestamp: string;
+  channel: string;
+  source_session_id: string | null;
+  payload: Record<string, unknown>;
+}
