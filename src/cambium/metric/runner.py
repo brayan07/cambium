@@ -112,11 +112,12 @@ class MetricRunner:
                 continue
             try:
                 request = self.request_service.create_request(
-                    session_id="metric-runner",
+                    session_id=None,
                     type=RequestType.SURVEY,
                     summary=m.survey_summary,
                     detail=m.survey_detail,
                     options=m.survey_options,
+                    created_by="metric-runner",
                 )
                 self.store.link_survey_request(request.id, m.name)
                 log.info("Fired survey for metric %s (request %s)", m.name, request.id[:8])

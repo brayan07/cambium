@@ -19,7 +19,7 @@ export type RequestStatus = "pending" | "answered" | "expired" | "rejected";
 
 export interface Request {
   id: string;
-  session_id: string;
+  session_id: string | null;
   work_item_id: string | null;
   type: RequestType;
   status: RequestStatus;
