@@ -258,6 +258,67 @@ function FileEntry({
 
 const MARKDOWN_EXTENSIONS = new Set([".md", ".markdown"]);
 
+// Split a markdown document into (frontmatter, body). Frontmatter is a YAML
+// block fenced by `---` that must start on line 1. Returns null frontmatter
+// if no valid block is present.
+function splitFrontmatter(
+  source: string,
+): { frontmatter: Array<[string, string]> | null; body: string } {
+  if (!source.startsWith("---")) {
+    return { frontmatter: null, body: source };
+  }
+  const rest = source.slice(3);
+  if (!rest.startsWith("\n") && !rest.startsWith("\r\n")) {
+    return { frontmatter: null, body: source };
+  }
+  const afterOpen = rest.replace(/^\r?\n/, "");
+  const closeMatch = afterOpen.match(/\r?\n---\s*(\r?\n|$)/);
+  if (!closeMatch || closeMatch.index === undefined) {
+    return { frontmatter: null, body: source };
+  }
+  const yaml = afterOpen.slice(0, closeMatch.index);
+  const body = afterOpen.slice(closeMatch.index + closeMatch[0].length);
+
+  const entries: Array<[string, string]> = [];
+  for (const line of yaml.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    const colon = trimmed.indexOf(":");
+    if (colon < 0) continue;
+    const key = trimmed.slice(0, colon).trim();
+    let value = trimmed.slice(colon + 1).trim();
+    if (
+      (value.startsWith('"') && value.endsWith('"')) ||
+      (value.startsWith("'") && value.endsWith("'"))
+    ) {
+      value = value.slice(1, -1);
+    }
+    entries.push([key, value]);
+  }
+  return { frontmatter: entries.length > 0 ? entries : null, body };
+}
+
+function Frontmatter({ entries }: { entries: Array<[string, string]> }) {
+  return (
+    <div className="mb-6 overflow-hidden rounded border border-border bg-surface">
+      <div className="border-b border-border bg-surface-raised px-3 py-1.5 font-mono text-[10px] uppercase tracking-wide text-text-dim">
+        frontmatter
+      </div>
+      <dl className="divide-y divide-border">
+        {entries.map(([key, value]) => (
+          <div
+            key={key}
+            className="flex gap-3 px-3 py-1.5 font-mono text-[11px]"
+          >
+            <dt className="w-32 flex-shrink-0 text-text-dim">{key}</dt>
+            <dd className="min-w-0 flex-1 break-words text-text">{value}</dd>
+          </div>
+        ))}
+      </dl>
+    </div>
+  );
+}
+
 function FileView({ root, path }: { root: FsRoot; path: string }) {
   const { data, isLoading, isError, error } = useFsFile(root, path);
 
@@ -294,12 +355,18 @@ function FileView({ root, path }: { root: FsRoot; path: string }) {
   if (!data) return null;
 
   const isMarkdown = MARKDOWN_EXTENSIONS.has(data.extension);
+  const { frontmatter, body } = isMarkdown
+    ? splitFrontmatter(data.content)
+    : { frontmatter: null, body: data.content };
 
   return (
     <div className="p-6">
       {isMarkdown ? (
-        <div className="prose-cambium max-w-3xl">
-          <Markdown remarkPlugins={[remarkGfm]}>{data.content}</Markdown>
+        <div className="max-w-3xl">
+          {frontmatter && <Frontmatter entries={frontmatter} />}
+          <div className="prose-cambium">
+            <Markdown remarkPlugins={[remarkGfm]}>{body}</Markdown>
+          </div>
         </div>
       ) : (
         <pre className="overflow-x-auto whitespace-pre-wrap break-words rounded border border-border bg-surface p-4 font-mono text-xs text-text">
