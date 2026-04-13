@@ -11,6 +11,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
+from cambium.models.message import Message
 from cambium.session.model import Session, SessionOrigin, SessionStatus
 
 log = logging.getLogger(__name__)
@@ -38,9 +39,17 @@ class SessionResponse(BaseModel):
     metadata: dict[str, Any]
 
 
+class Attachment(BaseModel):
+    """A file attachment on a message."""
+    data_url: str             # base64 data URL (data:<media_type>;base64,...)
+    name: str | None = None   # original filename; auto-generated if absent
+
+
 class SendMessageRequest(BaseModel):
     """OpenAI-compatible message request (simplified)."""
     messages: list[dict[str, Any]]
+    images: list[str] | None = None         # base64 data URLs (legacy, images only)
+    attachments: list[Attachment] | None = None  # general-purpose file attachments
     stream: bool = True
 
 
@@ -59,15 +68,17 @@ _session_store = None
 _broadcaster_registry = None
 _routine_registry = None
 _routine_runner = None
+_queue = None
 
 
-def configure(session_store, broadcaster_registry, routine_registry, routine_runner):
+def configure(session_store, broadcaster_registry, routine_registry, routine_runner, queue=None):
     """Called by app.py to inject dependencies."""
-    global _session_store, _broadcaster_registry, _routine_registry, _routine_runner
+    global _session_store, _broadcaster_registry, _routine_registry, _routine_runner, _queue
     _session_store = session_store
     _broadcaster_registry = broadcaster_registry
     _routine_registry = routine_registry
     _routine_runner = routine_runner
+    _queue = queue
 
 
 def _get_deps():
@@ -126,13 +137,24 @@ async def send_message(session_id: str, body: SendMessageRequest):
 
     routine = routine_reg.get(session.routine_name)
     if routine is None:
-        raise HTTPException(status_code=500, detail=f"Routine not found: {session.routine_name}")
+        raise HTTPException(status_code=404, detail=f"Routine not found: {session.routine_name}")
 
     # Extract the last user message
     user_messages = [m for m in body.messages if m.get("role") == "user"]
     if not user_messages:
         raise HTTPException(status_code=400, detail="No user message provided")
     user_content = user_messages[-1].get("content", "")
+
+    # Merge legacy `images` field and new `attachments` field into a
+    # unified list of (data_url, name|None) tuples for the runner.
+    all_attachments: list[tuple[str, str | None]] = []
+    for url in (body.images or []):
+        all_attachments.append((url, None))
+    for att in (body.attachments or []):
+        all_attachments.append((att.data_url, att.name))
+
+    # Separate image data URLs (for inline vision) from all attachments
+    image_data_urls = [url for url, _ in all_attachments if url.startswith("data:image/")]
 
     # Create broadcaster for this invocation
     broadcaster = broadcaster_reg.create(session_id)
@@ -147,6 +169,8 @@ async def send_message(session_id: str, body: SendMessageRequest):
                     routine=routine,
                     session_id=session_id,
                     user_message=user_content,
+                    images=image_data_urls if image_data_urls else None,
+                    attachments=all_attachments if all_attachments else None,
                     live=True,
                     on_event=lambda chunk: broadcaster.publish(chunk),
                 ),
@@ -282,6 +306,22 @@ def delete_session(session_id: str):
     if broadcaster:
         broadcaster.close()
         broadcaster_reg.remove(session_id)
+
+    # Notify downstream routines (e.g., session-summarizer) that
+    # the interactive session is now finished — but only if there
+    # are actual messages to summarize.
+    has_messages = store.get_messages(session_id, limit=1)
+    if _queue and has_messages:
+        _queue.publish(Message.create(
+            channel="sessions_completed",
+            payload={
+                "session_id": session_id,
+                "routine_name": session.routine_name,
+                "success": True,
+                "trigger_channel": "user",
+            },
+            source="system",
+        ))
 
     log.info(f"Session {session_id[:8]} ended")
 

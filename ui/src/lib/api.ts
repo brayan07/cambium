@@ -7,7 +7,10 @@
  */
 
 const params = new URLSearchParams(window.location.search);
-export const API_BASE = params.get("api") || "/api";
+// In dev, Vite proxies /api/* → backend with the prefix stripped.
+// In production, the UI is served by FastAPI directly — no prefix needed.
+const defaultBase = import.meta.env.DEV ? "/api" : "";
+export const API_BASE = params.get("api") || defaultBase;
 
 export async function apiGet<T>(
   path: string,
@@ -41,6 +44,13 @@ export async function apiPost<T>(
     throw new Error(`POST ${path}: ${res.status} ${res.statusText}`);
   }
   return res.json();
+}
+
+export async function apiDelete(path: string): Promise<void> {
+  const res = await fetch(`${API_BASE}${path}`, { method: "DELETE" });
+  if (!res.ok) {
+    throw new Error(`DELETE ${path}: ${res.status} ${res.statusText}`);
+  }
 }
 
 /** Build a WebSocket URL for the terminal bridge. */

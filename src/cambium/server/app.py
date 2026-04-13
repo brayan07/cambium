@@ -89,6 +89,7 @@ class CambiumServer:
         consumer: ConsumerLoop,
         timer_loop: TimerLoop | None = None,
         request_service: RequestService | None = None,
+        session_store=None,
     ) -> None:
         self.queue = queue
         self.routine_registry = routine_registry
@@ -96,6 +97,7 @@ class CambiumServer:
         self.consumer = consumer
         self.timer_loop = timer_loop
         self.request_service = request_service
+        self.session_store = session_store
         self._consumer_task: asyncio.Task | None = None
         self._timer_task: asyncio.Task | None = None
 
@@ -124,6 +126,7 @@ class CambiumServer:
 
     async def _run_consumer(self) -> None:
         loop = asyncio.get_event_loop()
+        reap_counter = 0
         while True:
             try:
                 results = await loop.run_in_executor(None, self.consumer.tick)
@@ -132,7 +135,35 @@ class CambiumServer:
                     log.info(f"Run result: {status} — {r.output[:100] if r.output else r.error}")
             except Exception:
                 log.exception("Consumer tick error")
+
+            # Reap idle interactive sessions every ~60s (30 ticks × 2s poll)
+            reap_counter += 1
+            if reap_counter >= 30:
+                reap_counter = 0
+                try:
+                    await loop.run_in_executor(None, self._reap_idle_sessions)
+                except Exception:
+                    log.exception("Session reaper error")
+
             await asyncio.sleep(self.consumer.poll_interval)
+
+    def _reap_idle_sessions(self) -> None:
+        """Mark idle interactive sessions as completed and notify the summarizer."""
+        if not self.session_store:
+            return
+        reaped = self.session_store.reap_idle_sessions(idle_seconds=600)
+        for session in reaped:
+            self.queue.publish(Message.create(
+                channel="sessions_completed",
+                payload={
+                    "session_id": session.id,
+                    "routine_name": session.routine_name,
+                    "success": True,
+                    "trigger_channel": "idle_timeout",
+                },
+                source="system",
+            ))
+            log.info(f"Reaped idle session {session.id[:8]} ({session.routine_name})")
 
     async def _run_timers(self) -> None:
         loop = asyncio.get_event_loop()
@@ -177,6 +208,22 @@ def _resolve_config_dir(repo_dir: Path) -> Path:
     if (repo_dir / "defaults" / "routines").exists():
         return repo_dir / "defaults"
     return repo_dir
+
+
+def _cleanup_zombie_sessions(session_store) -> None:
+    """Mark any 'active' or 'created' sessions as completed on startup.
+
+    If the server is starting, no sessions can be legitimately running —
+    their processes died with the previous server instance.
+    """
+    from cambium.session.model import SessionStatus
+
+    zombies = session_store.list_sessions(status=SessionStatus.ACTIVE, limit=500)
+    zombies += session_store.list_sessions(status=SessionStatus.CREATED, limit=500)
+    for s in zombies:
+        session_store.update_status(s.id, SessionStatus.COMPLETED)
+    if zombies:
+        log.info(f"Cleaned up {len(zombies)} zombie session(s) from previous server run")
 
 
 def build_server(
@@ -238,6 +285,10 @@ def build_server(
 
     # Session store (shares DB with queue)
     session_store = SessionStore(db_path)
+
+    # Clean up zombie sessions — any session still "active" from before this
+    # server started has no running process behind it.
+    _cleanup_zombie_sessions(session_store)
 
     # Episode store (shares DB with queue + sessions)
     episode_store = EpisodeStore(db_path)
@@ -312,6 +363,7 @@ def build_server(
         broadcaster_registry=broadcaster_registry,
         routine_registry=routine_registry,
         routine_runner=routine_runner,
+        queue=queue,
     )
 
     # Consumer loop
@@ -341,7 +393,7 @@ def build_server(
     timer_loop = TimerLoop(timers, queue) if timers else None
 
     # Configure terminal PTY bridge with directory paths
-    terminal_module.configure(repo_dir=repo_dir, data_dir=data_dir)
+    terminal_module.configure(repo_dir=repo_dir, data_dir=data_dir, session_store=session_store)
 
     log.info(f"Config dir: {config_dir}")
     log.info(f"Data dir: {data_dir}")
@@ -359,6 +411,7 @@ def build_server(
         consumer=consumer,
         timer_loop=timer_loop,
         request_service=request_service,
+        session_store=session_store,
     )
 
 
@@ -534,7 +587,8 @@ def run_server(
 
         @app.get("/{path:path}")
         async def spa_fallback(path: str):
-            # Check if a static file exists first
+            # Don't intercept API routes — only serve static files and SPA fallback
+            # for paths that don't match any registered API endpoints.
             static_path = ui_dist / path
             if static_path.is_file() and ".." not in path:
                 return FileResponse(str(static_path))

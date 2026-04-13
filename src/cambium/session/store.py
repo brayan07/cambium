@@ -118,6 +118,39 @@ class SessionStore:
             )
             self._conn.commit()
 
+    def reap_idle_sessions(self, idle_seconds: int = 600) -> list[Session]:
+        """Find active user sessions idle longer than ``idle_seconds`` and mark them COMPLETED.
+
+        Returns the list of sessions that were reaped.
+        """
+        from datetime import datetime, timezone, timedelta
+
+        cutoff = (datetime.now(timezone.utc) - timedelta(seconds=idle_seconds)).isoformat()
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT id, origin, status, routine_name, adapter_instance_name, "
+                "created_at, updated_at, metadata FROM sessions "
+                "WHERE status = ? AND origin = ? AND updated_at < ?",
+                (SessionStatus.ACTIVE.value, SessionOrigin.USER.value, cutoff),
+            ).fetchall()
+            if not rows:
+                return []
+
+            now = datetime.now(timezone.utc).isoformat()
+            reaped = []
+            for r in rows:
+                self._conn.execute(
+                    "UPDATE sessions SET status = ?, updated_at = ? WHERE id = ?",
+                    (SessionStatus.COMPLETED.value, now, r[0]),
+                )
+                reaped.append(Session(
+                    id=r[0], origin=SessionOrigin(r[1]), status=SessionStatus.COMPLETED,
+                    routine_name=r[3], adapter_instance_name=r[4],
+                    created_at=r[5], updated_at=now, metadata=json.loads(r[7]),
+                ))
+            self._conn.commit()
+            return reaped
+
     def list_sessions(
         self,
         status: SessionStatus | None = None,

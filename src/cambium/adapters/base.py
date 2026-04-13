@@ -77,6 +77,7 @@ class AdapterType(ABC):
         session_id: str,
         session_token: str = "",
         api_base_url: str = "",
+        images: list[str] | None = None,
         live: bool = True,
         on_event: Callable[[dict[str, Any]], None] | None = None,
         on_raw_event: Callable[[TranscriptEvent], None] | None = None,
@@ -105,6 +106,7 @@ class AdapterType(ABC):
         instance: AdapterInstance,
         session_id: str,
         cwd: Path | None = None,
+        resume: bool = False,
     ) -> None:
         """Attach to a live session.
 

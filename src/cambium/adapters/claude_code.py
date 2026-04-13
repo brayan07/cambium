@@ -49,6 +49,7 @@ class ClaudeCodeAdapter(AdapterType):
         session_id: str,
         session_token: str = "",
         api_base_url: str = "",
+        images: list[str] | None = None,
         live: bool = True,
         on_event: Callable[[dict[str, Any]], None] | None = None,
         on_raw_event: Callable[[TranscriptEvent], None] | None = None,
@@ -59,7 +60,7 @@ class ClaudeCodeAdapter(AdapterType):
             return self._mock_send(instance, user_message, session_id, on_event)
         return self._live_send(
             instance, user_message, session_id, session_token, api_base_url,
-            on_event, on_raw_event, cwd, resume,
+            images, on_event, on_raw_event, cwd, resume,
         )
 
     def _mock_send(
@@ -82,6 +83,7 @@ class ClaudeCodeAdapter(AdapterType):
         session_id: str,
         session_token: str,
         api_base_url: str,
+        images: list[str] | None = None,
         on_event: Callable[[dict[str, Any]], None] | None = None,
         on_raw_event: Callable[[TranscriptEvent], None] | None = None,
         cwd: Path | None = None,
@@ -111,6 +113,8 @@ class ClaudeCodeAdapter(AdapterType):
             model = config.get("model", "opus")
             timeout = config.get("timeout", 1200)
 
+            use_stream_input = bool(images)
+
             cmd = [
                 "claude",
                 "--print", "-",
@@ -121,6 +125,9 @@ class ClaudeCodeAdapter(AdapterType):
                 "--add-dir", tmp_dir,
                 "--append-system-prompt-file", str(prompt_file),
             ]
+
+            if use_stream_input:
+                cmd.extend(["--input-format", "stream-json"])
 
             if resume:
                 cmd.extend(["--resume", session_id])
@@ -138,6 +145,7 @@ class ClaudeCodeAdapter(AdapterType):
             log.info(
                 f"{'Resuming' if resume else 'Starting'} session '{session_id[:8]}' "
                 f"instance='{instance.name}' model={model} skills={len(skill_names)}"
+                f"{' (with images)' if images else ''}"
             )
 
             proc = subprocess.Popen(
@@ -151,7 +159,12 @@ class ClaudeCodeAdapter(AdapterType):
             )
 
             assert proc.stdin is not None
-            proc.stdin.write(user_message)
+            if use_stream_input:
+                # Build multimodal content with images + text
+                stdin_msg = self._build_stream_json_input(user_message, images or [])
+                proc.stdin.write(stdin_msg)
+            else:
+                proc.stdin.write(user_message)
             proc.stdin.close()
 
             last_text = ""
@@ -237,6 +250,45 @@ class ClaudeCodeAdapter(AdapterType):
                 # Clean up .mcp.json from caller-provided cwd
                 mcp_config_path.unlink(missing_ok=True)
 
+    @staticmethod
+    def _build_stream_json_input(text: str, image_data_urls: list[str]) -> str:
+        """Build NDJSON input for ``--input-format stream-json`` with images.
+
+        Each image data URL (``data:image/png;base64,...``) becomes an image
+        content block alongside the text.
+        """
+        import re
+
+        content: list[dict[str, Any]] = []
+
+        # Parse data URLs into image content blocks
+        for data_url in image_data_urls:
+            match = re.match(r"data:(image/[^;]+);base64,(.+)", data_url)
+            if match:
+                media_type = match.group(1)
+                b64_data = match.group(2)
+                content.append({
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": media_type,
+                        "data": b64_data,
+                    },
+                })
+
+        # Add text content block
+        if text:
+            content.append({"type": "text", "text": text})
+
+        msg = {
+            "type": "user",
+            "message": {
+                "role": "user",
+                "content": content,
+            },
+        }
+        return json.dumps(msg) + "\n"
+
     def _resolve_mcp_servers(self, config: dict, target_dir: Path) -> Path | None:
         """Resolve named MCP servers and write .mcp.json into target_dir.
 
@@ -294,7 +346,7 @@ class ClaudeCodeAdapter(AdapterType):
 
     def attach(
         self, instance: AdapterInstance, session_id: str, cwd: Path | None = None,
-        initial_message: str | None = None,
+        initial_message: str | None = None, resume: bool = False,
     ) -> None:
         """Attach to a Claude Code session.
 
@@ -323,15 +375,19 @@ class ClaudeCodeAdapter(AdapterType):
 
         cmd = [
             "claude",
-            "--session-id", session_id,
             "--model", model,
             "--dangerously-skip-permissions",
             "--add-dir", tmp_dir,
             "--append-system-prompt-file", str(prompt_file),
         ]
 
+        if resume:
+            cmd.extend(["--resume", session_id])
+        else:
+            cmd.extend(["--session-id", session_id])
+
         log.info(
-            f"Attaching to session '{session_id[:8]}' "
+            f"{'Resuming' if resume else 'Attaching to'} session '{session_id[:8]}' "
             f"instance='{instance.name}' model={model}"
         )
 
@@ -494,8 +550,9 @@ def _extract_content(event: dict, event_type: str) -> str:
             elif block_type == "thinking":
                 parts.append(f"[thinking] {block.get('thinking', '')}")
             elif block_type == "tool_use":
+                tool_id = block.get("id", "?")
                 parts.append(
-                    f"[tool_use] {block.get('name', '?')}"
+                    f"[tool_use:{tool_id}] {block.get('name', '?')}"
                     f"({json.dumps(block.get('input', {}))})"
                 )
             elif block_type == "tool_result":

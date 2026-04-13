@@ -11,6 +11,8 @@ interface TerminalProps {
   wsPath: string;
   /** Called when the terminal session ends (WebSocket closes) */
   onSessionEnd?: () => void;
+  /** Called when the server reports the real Cambium session ID */
+  onSessionId?: (sessionId: string) => void;
 }
 
 type ConnectionState = "connecting" | "connected" | "disconnected" | "error";
@@ -40,13 +42,15 @@ const THEME = {
   brightWhite: "#ffffff",
 };
 
-export function Terminal({ wsPath, onSessionEnd }: TerminalProps) {
+export function Terminal({ wsPath, onSessionEnd, onSessionId }: TerminalProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<XTerm | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
   const onSessionEndRef = useRef(onSessionEnd);
   onSessionEndRef.current = onSessionEnd;
+  const onSessionIdRef = useRef(onSessionId);
+  onSessionIdRef.current = onSessionId;
   const [state, setState] = useState<ConnectionState>("connecting");
 
   useEffect(() => {
@@ -84,8 +88,42 @@ export function Terminal({ wsPath, onSessionEnd }: TerminalProps) {
 
     ws.onopen = () => {
       setState("connected");
-      const attachAddon = new AttachAddon(ws);
-      term.loadAddon(attachAddon);
+
+      // The server may send a JSON control message (session_init) before
+      // PTY output. Intercept it, then hand the socket to AttachAddon.
+      const earlyHandler = (ev: MessageEvent) => {
+        // Control messages arrive as text (string), PTY data as ArrayBuffer
+        if (typeof ev.data === "string") {
+          try {
+            const ctrl = JSON.parse(ev.data);
+            if (ctrl.type === "session_init" && ctrl.session_id) {
+              onSessionIdRef.current?.(ctrl.session_id);
+            }
+          } catch {
+            // Not JSON — shouldn't happen, but write to terminal if it does
+            term.write(ev.data);
+          }
+          return;
+        }
+        // Binary data means PTY output has started — attach and replay
+        ws.removeEventListener("message", earlyHandler);
+        const attachAddon = new AttachAddon(ws);
+        term.loadAddon(attachAddon);
+        // Write this first binary chunk that AttachAddon missed
+        term.write(new Uint8Array(ev.data));
+      };
+      ws.addEventListener("message", earlyHandler);
+
+      // If no message arrives within 2s, attach anyway (resume case — server
+      // may not send session_init for resumes since UI already knows the ID)
+      setTimeout(() => {
+        ws.removeEventListener("message", earlyHandler);
+        // Only attach if AttachAddon wasn't loaded yet
+        if (term.buffer.normal.length <= 1) {
+          const attachAddon = new AttachAddon(ws);
+          term.loadAddon(attachAddon);
+        }
+      }, 2000);
 
       // Send initial resize
       const dims = fitAddon.proposeDimensions();

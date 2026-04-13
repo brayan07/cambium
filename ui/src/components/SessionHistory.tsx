@@ -1,6 +1,6 @@
 import { useEffect, useRef, useMemo } from "react";
 import { useMessages } from "../hooks/useMessages";
-import { MessageList, type DisplayMessage } from "./MessageList";
+import { MessageList, classifyMessages } from "./MessageList";
 import type { Session } from "../lib/types";
 
 interface SessionHistoryProps {
@@ -12,15 +12,9 @@ export function SessionHistory({ session, onResume }: SessionHistoryProps) {
   const { data: messages, isLoading } = useMessages(session.id);
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  // Map REST messages to the shared DisplayMessage shape
-  const displayMessages: DisplayMessage[] = useMemo(
-    () =>
-      (messages ?? []).map((m) => ({
-        id: m.id,
-        content: m.content,
-        role: m.role as DisplayMessage["role"],
-        timestamp: new Date(m.created_at).getTime(),
-      })),
+  // Classify raw API messages into properly typed DisplayMessages
+  const displayMessages = useMemo(
+    () => classifyMessages(messages ?? []),
     [messages],
   );
 
@@ -45,12 +39,12 @@ export function SessionHistory({ session, onResume }: SessionHistoryProps) {
         <span className="text-[10px] text-text-dim">
           {new Date(session.updated_at).toLocaleString()}
         </span>
-        {session.status === "completed" && (
+        {session.origin === "user" && (session.status === "completed" || session.status === "active") && (
           <button
             onClick={() => onResume(session)}
             className="rounded border border-accent bg-accent-dim px-3 py-1 font-display text-xs text-accent transition-colors hover:bg-accent hover:text-base"
           >
-            Resume
+            {session.status === "active" ? "Continue" : "Resume"}
           </button>
         )}
       </div>
