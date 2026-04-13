@@ -641,13 +641,12 @@ def _mount_filesystem_access(data_dir: Path, repo_dir: Path | None) -> None:
         return target
 
     def _git_remote_url(repo: Path) -> str | None:
-        """Return the https URL for `origin`, if the directory is a git repo
-        with an origin remote. Handles both https:// and git@host:owner/repo
-        forms. Returns None when the repo has no remote (e.g. memory)."""
+        """Return the https URL for `origin` for the git repo that contains
+        ``repo``. Walks up parents to find the enclosing .git so we pick up
+        the remote even when ``repo`` is a subdirectory of a larger repo
+        (e.g. ``defaults/`` inside the combined user repo). Returns None if
+        no enclosing repo, no origin remote, or git is unavailable."""
         import subprocess as _sp
-        git_dir = repo / ".git"
-        if not git_dir.exists():
-            return None
         try:
             result = _sp.run(
                 ["git", "-C", str(repo), "remote", "get-url", "origin"],
