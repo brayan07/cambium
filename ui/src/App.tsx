@@ -5,7 +5,8 @@ import { ChatPage } from "./pages/ChatPage";
 import { InboxPage } from "./pages/InboxPage";
 import { WorkPage } from "./pages/WorkPage";
 import { DashboardPage } from "./pages/DashboardPage";
-import { PlaceholderPage } from "./pages/PlaceholderPage";
+import { MemoryPage } from "./pages/MemoryPage";
+import { ConfigPage } from "./pages/ConfigPage";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -27,24 +28,8 @@ export default function App() {
             <Route path="/inbox" element={<InboxPage />} />
             <Route path="/work" element={<WorkPage />} />
             <Route path="/dashboard" element={<DashboardPage />} />
-            <Route
-              path="/mind/*"
-              element={
-                <PlaceholderPage
-                  title="Mind"
-                  description="Constitution, preferences, knowledge — Phase 5"
-                />
-              }
-            />
-            <Route
-              path="/config"
-              element={
-                <PlaceholderPage
-                  title="Configuration"
-                  description="Routines, adapters, timers — Phase 5"
-                />
-              }
-            />
+            <Route path="/memory" element={<MemoryPage />} />
+            <Route path="/config" element={<ConfigPage />} />
           </Route>
         </Routes>
       </BrowserRouter>
