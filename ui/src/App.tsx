@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Layout } from "./components/Layout";
 import { ChatPage } from "./pages/ChatPage";
+import { InboxPage } from "./pages/InboxPage";
 import { PlaceholderPage } from "./pages/PlaceholderPage";
 
 const queryClient = new QueryClient({
@@ -21,15 +22,7 @@ export default function App() {
           <Route element={<Layout />}>
             <Route path="/" element={<Navigate to="/chat" replace />} />
             <Route path="/chat" element={<ChatPage />} />
-            <Route
-              path="/inbox"
-              element={
-                <PlaceholderPage
-                  title="Inbox"
-                  description="Requests and user tasks — Phase 3"
-                />
-              }
-            />
+            <Route path="/inbox" element={<InboxPage />} />
             <Route
               path="/work"
               element={

@@ -31,6 +31,7 @@ from cambium.metric.model import load_metrics
 from cambium.metric.runner import MetricRunner
 from cambium.metric.service import MetricService
 from cambium.metric.store import ReadingStore
+from cambium.server import auth as auth_module
 from cambium.server import episodes as episodes_module
 from cambium.server import metrics as metrics_module
 from cambium.server import requests as requests_module
@@ -436,6 +437,7 @@ app = FastAPI(
 
 from cambium.server import terminal as terminal_module
 
+app.include_router(auth_module.router)
 app.include_router(episodes_module.router)
 app.include_router(metrics_module.router)
 app.include_router(requests_module.router)

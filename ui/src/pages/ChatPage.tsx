@@ -1,9 +1,10 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
+import { useSearchParams } from "react-router";
 import { SessionList } from "../components/SessionList";
 import { ChatView } from "../components/ChatView";
 import { ObservationView } from "../components/ObservationView";
 import { SessionHistory } from "../components/SessionHistory";
-import { apiPost } from "../lib/api";
+import { apiGet, apiPost } from "../lib/api";
 import type { Session } from "../lib/types";
 
 /**
@@ -20,6 +21,29 @@ type ViewState =
 
 export function ChatPage() {
   const [view, setView] = useState<ViewState>({ mode: "empty" });
+  const [searchParams] = useSearchParams();
+  const processedRef = useRef<string | null>(null);
+
+  // Deep-link: if the URL has ?session=<id>, fetch the session and open it.
+  // Used by the inbox to link back to the session a request came from.
+  //
+  // We track processed IDs in a ref so navigating to the same ?session=<id>
+  // twice in a row is idempotent without clearing the query param (which
+  // caused a re-render race with setView).
+  useEffect(() => {
+    const sessionId = searchParams.get("session");
+    if (!sessionId || processedRef.current === sessionId) return;
+    processedRef.current = sessionId;
+
+    apiGet<Session>(`/sessions/${sessionId}`)
+      .then((session) => {
+        setView({ mode: "browse", session });
+      })
+      .catch((err) => {
+        console.error("Failed to load session:", err);
+        processedRef.current = null;
+      });
+  }, [searchParams]);
 
   const handleSelectSession = useCallback(
     (session: Session) => {
@@ -68,11 +92,22 @@ export function ChatPage() {
         if (session.status === "active" && session.origin === "system") {
           return <ObservationView session={session} />;
         }
-        // Active user session (detached) → go straight back to chat
-        if (session.status === "active" && session.origin === "user") {
-          return <ChatView key={session.id} session={session} />;
+        // User session that's still chattable (created or active) → ChatView.
+        // "created" means the session exists but no message has been sent
+        // yet; the user should be able to type the first one.
+        if (
+          session.origin === "user" &&
+          (session.status === "active" || session.status === "created")
+        ) {
+          return (
+            <ChatView
+              key={session.id}
+              session={session}
+              onEnd={handleEndSession}
+            />
+          );
         }
-        // Completed session → history with resume option
+        // Completed/failed session → history with resume option
         return (
           <SessionHistory session={session} onResume={handleResume} />
         );

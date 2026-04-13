@@ -34,16 +34,40 @@ export async function apiGet<T>(
 export async function apiPost<T>(
   path: string,
   body?: unknown,
+  options?: { auth?: boolean },
 ): Promise<T> {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
+  if (options?.auth) {
+    const token = await getUIToken();
+    headers["Authorization"] = `Bearer ${token}`;
+  }
   const res = await fetch(`${API_BASE}${path}`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers,
     body: body ? JSON.stringify(body) : undefined,
   });
   if (!res.ok) {
     throw new Error(`POST ${path}: ${res.status} ${res.statusText}`);
   }
   return res.json();
+}
+
+// --- UI token ---
+// The server mints a "human" routine token at startup; we fetch it once
+// and cache in memory. Used for authenticating direct UI actions (e.g.
+// answering HITL requests) so they can't be impersonated by other routines.
+
+let _uiTokenPromise: Promise<string> | null = null;
+
+export function getUIToken(): Promise<string> {
+  if (!_uiTokenPromise) {
+    _uiTokenPromise = apiGet<{ token: string }>("/auth/ui-token").then(
+      (r) => r.token,
+    );
+  }
+  return _uiTokenPromise;
 }
 
 export async function apiDelete(path: string): Promise<void> {
