@@ -34,7 +34,7 @@ class AnswerRequestRequest(BaseModel):
 
 class RequestResponse(BaseModel):
     id: str
-    session_id: str
+    session_id: str | None
     work_item_id: str | None
     type: str
     status: str
@@ -193,7 +193,7 @@ class SeedRequestRequest(BaseModel):
     options: list[str] | None = None
     default: str | None = None
     timeout_hours: float | None = None
-    session_id: str = "seed-session"
+    session_id: str | None = None
     created_by: str = "seed"
 
 

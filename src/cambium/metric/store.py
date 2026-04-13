@@ -172,6 +172,16 @@ class ReadingStore:
             self._conn.rollback()
             raise
 
+    def get_latest_survey_fired_at(self, metric_name: str) -> str | None:
+        """Return the ISO timestamp of the most recently fired survey
+        for this metric (regardless of whether it has been answered).
+        Used to schedule the next fire independently of answer latency."""
+        row = self._conn.execute(
+            "SELECT MAX(created_at) FROM survey_requests WHERE metric_name = ?",
+            (metric_name,),
+        ).fetchone()
+        return row[0] if row and row[0] else None
+
     def get_metric_for_request(self, request_id: str) -> str | None:
         row = self._conn.execute(
             "SELECT metric_name FROM survey_requests WHERE request_id = ?",

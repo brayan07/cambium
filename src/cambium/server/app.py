@@ -614,20 +614,79 @@ def _mount_filesystem_access(data_dir: Path, repo_dir: Path | None) -> None:
     if config_dir.exists():
         app.mount("/config", StaticFiles(directory=str(config_dir)), name="config")
 
-    @app.get("/fs/ls")
-    def list_directory(root: str, path: str = ""):
-        """List files in memory or config directory."""
-        roots = {"memory": memory_dir, "config": config_dir}
+    roots = {"memory": memory_dir, "config": config_dir}
+
+    # Max size for /fs/read — larger files return a size-exceeded error so the
+    # UI can show a message rather than hanging on a huge blob.
+    FS_READ_MAX_BYTES = 1_000_000  # 1 MB
+
+    # File extensions we're willing to return as text. Anything else (images,
+    # binaries) should be linked to the StaticFiles mount instead.
+    FS_TEXT_EXTENSIONS = {
+        ".md", ".markdown", ".txt", ".yaml", ".yml", ".json",
+        ".py", ".ts", ".tsx", ".js", ".jsx", ".toml", ".ini",
+        ".cfg", ".conf", ".sh", ".log", ".csv", ".xml", ".html",
+        ".css", ".sql", "",
+    }
+
+    def _resolve_fs_target(root: str, path: str) -> Path:
         base = roots.get(root)
         if base is None:
             raise HTTPException(400, f"Unknown root: {root}. Use 'memory' or 'config'.")
-
         target = (base / path).resolve()
-        # Path traversal protection
         if not str(target).startswith(str(base.resolve())):
             raise HTTPException(403, "Path traversal not allowed")
         if not target.exists():
             raise HTTPException(404, f"Path not found: {path}")
+        return target
+
+    def _git_remote_url(repo: Path) -> str | None:
+        """Return the https URL for `origin` for the git repo that contains
+        ``repo``. Walks up parents to find the enclosing .git so we pick up
+        the remote even when ``repo`` is a subdirectory of a larger repo
+        (e.g. ``defaults/`` inside the combined user repo). Returns None if
+        no enclosing repo, no origin remote, or git is unavailable."""
+        import subprocess as _sp
+        try:
+            result = _sp.run(
+                ["git", "-C", str(repo), "remote", "get-url", "origin"],
+                capture_output=True, text=True, timeout=2,
+            )
+        except (FileNotFoundError, _sp.SubprocessError):
+            return None
+        if result.returncode != 0:
+            return None
+        url = result.stdout.strip()
+        if not url:
+            return None
+        # Normalize git@github.com:owner/repo(.git) → https://github.com/owner/repo
+        if url.startswith("git@"):
+            try:
+                host, path = url[4:].split(":", 1)
+                url = f"https://{host}/{path}"
+            except ValueError:
+                return None
+        if url.endswith(".git"):
+            url = url[:-4]
+        return url
+
+    @app.get("/fs/info")
+    def fs_info(root: str):
+        """Return the absolute path and optional git remote for a root."""
+        base = roots.get(root)
+        if base is None:
+            raise HTTPException(400, f"Unknown root: {root}. Use 'memory' or 'config'.")
+        return {
+            "root": root,
+            "path": str(base.resolve()),
+            "exists": base.exists(),
+            "remote_url": _git_remote_url(base) if base.exists() else None,
+        }
+
+    @app.get("/fs/ls")
+    def list_directory(root: str, path: str = ""):
+        """List files in memory or config directory."""
+        target = _resolve_fs_target(root, path)
         if not target.is_dir():
             raise HTTPException(400, f"Not a directory: {path}")
 
@@ -643,3 +702,39 @@ def _mount_filesystem_access(data_dir: Path, repo_dir: Path | None) -> None:
                 "modified": stat.st_mtime,
             })
         return {"entries": entries}
+
+    @app.get("/fs/read")
+    def read_file(root: str, path: str):
+        """Return the text contents of a file under memory or config.
+
+        Guards: size cap, extension allow-list, path traversal protection
+        (inherited from `_resolve_fs_target`). Binary files are rejected with
+        415 so the UI can fall back to a download link via the StaticFiles
+        mount.
+        """
+        target = _resolve_fs_target(root, path)
+        if not target.is_file():
+            raise HTTPException(400, f"Not a file: {path}")
+
+        stat = target.stat()
+        if stat.st_size > FS_READ_MAX_BYTES:
+            raise HTTPException(
+                413,
+                f"File too large ({stat.st_size} bytes); max {FS_READ_MAX_BYTES}",
+            )
+
+        ext = target.suffix.lower()
+        if ext not in FS_TEXT_EXTENSIONS:
+            raise HTTPException(415, f"Unsupported file type: {ext or '(no extension)'}")
+
+        try:
+            content = target.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            raise HTTPException(415, "File is not valid UTF-8 text")
+
+        return {
+            "content": content,
+            "size": stat.st_size,
+            "modified": stat.st_mtime,
+            "extension": ext,
+        }

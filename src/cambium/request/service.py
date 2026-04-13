@@ -21,7 +21,7 @@ class RequestService:
 
     def create_request(
         self,
-        session_id: str,
+        session_id: str | None,
         type: RequestType,
         summary: str,
         detail: str = "",

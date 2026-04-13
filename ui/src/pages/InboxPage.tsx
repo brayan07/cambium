@@ -189,7 +189,7 @@ function RequestCard({ request }: { request: Request }) {
       {expanded && (
         <div className="mt-3 ml-7">
           {/* Source session link */}
-          {request.session_id && request.session_id !== "seed-session" && (
+          {request.session_id && (
             <Link
               to={`/chat?session=${request.session_id}`}
               className="mb-2 inline-flex items-center gap-1 text-[11px] text-text-dim transition-colors hover:text-accent"

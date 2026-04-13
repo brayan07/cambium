@@ -7,12 +7,15 @@ import {
   Radio,
   AlertTriangle,
   CircleDot,
+  ExternalLink,
+  HardDrive,
 } from "lucide-react";
 import { useHealth } from "../hooks/useHealth";
 import { useSessions } from "../hooks/useSessions";
 import { useRequestSummary } from "../hooks/useRequests";
 import { useWorkItems } from "../hooks/useWorkItems";
 import { useQueueStatus, useRecentEvents } from "../hooks/useDashboard";
+import { useFsInfo } from "../hooks/useFs";
 import type { ChannelEvent, Session, WorkItemStatus } from "../lib/types";
 
 export function DashboardPage() {
@@ -22,6 +25,8 @@ export function DashboardPage() {
   const requestSummary = useRequestSummary();
   const workItems = useWorkItems();
   const events = useRecentEvents(50);
+  const memoryInfo = useFsInfo("memory");
+  const configInfo = useFsInfo("config");
 
   const workCounts = useMemo(() => {
     const counts: Partial<Record<WorkItemStatus, number>> = {};
@@ -145,6 +150,22 @@ export function DashboardPage() {
           </Panel>
         </div>
 
+        {/* Storage locations */}
+        <div className="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-2">
+          <StorageCard
+            label="Memory"
+            to="/memory"
+            path={memoryInfo.data?.path}
+            remoteUrl={memoryInfo.data?.remote_url ?? null}
+          />
+          <StorageCard
+            label="Config"
+            to="/config"
+            path={configInfo.data?.path}
+            remoteUrl={configInfo.data?.remote_url ?? null}
+          />
+        </div>
+
         {!health.data?.consumer_running && health.data && (
           <div className="mt-6 flex items-center gap-2 rounded border border-status-failed/40 bg-status-failed/10 px-4 py-3 text-sm text-status-failed">
             <AlertTriangle className="h-4 w-4" />
@@ -217,6 +238,53 @@ function Panel({
         </h2>
       </div>
       <div className="max-h-96 overflow-y-auto">{children}</div>
+    </div>
+  );
+}
+
+function StorageCard({
+  label,
+  to,
+  path,
+  remoteUrl,
+}: {
+  label: string;
+  to: string;
+  path: string | undefined;
+  remoteUrl: string | null;
+}) {
+  return (
+    <div className="rounded border border-border bg-surface p-4">
+      <div className="flex items-center justify-between gap-2 text-text-muted">
+        <div className="flex items-center gap-2">
+          <HardDrive className="h-4 w-4" />
+          <span className="text-[10px] uppercase tracking-wide">{label}</span>
+        </div>
+        <Link to={to} className="text-[11px] text-accent hover:text-accent-hover">
+          browse →
+        </Link>
+      </div>
+      <div
+        className="mt-3 break-all font-mono text-[11px] text-text"
+        title={path ?? ""}
+      >
+        {path ?? "—"}
+      </div>
+      {remoteUrl ? (
+        <a
+          href={remoteUrl}
+          target="_blank"
+          rel="noreferrer"
+          className="mt-2 inline-flex items-center gap-1 font-mono text-[10px] text-accent hover:text-accent-hover"
+        >
+          <ExternalLink className="h-3 w-3" />
+          {remoteUrl.replace(/^https?:\/\//, "")}
+        </a>
+      ) : (
+        <div className="mt-2 font-mono text-[10px] text-text-dim">
+          no git remote
+        </div>
+      )}
     </div>
   );
 }

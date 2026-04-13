@@ -4,7 +4,7 @@ import {
   Inbox,
   ListTree,
   LayoutDashboard,
-  Brain,
+  BookOpen,
   Settings,
   PanelLeftClose,
   PanelLeftOpen,
@@ -21,7 +21,7 @@ const navItems = [
   { to: "/inbox", icon: Inbox, label: "Inbox", badge: true },
   { to: "/work", icon: ListTree, label: "Work" },
   { to: "/dashboard", icon: LayoutDashboard, label: "Dashboard" },
-  { to: "/mind", icon: Brain, label: "Mind" },
+  { to: "/memory", icon: BookOpen, label: "Memory" },
   { to: "/config", icon: Settings, label: "Config" },
 ];
 

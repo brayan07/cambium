@@ -33,17 +33,14 @@ export function useSessionStream(sessionId: string | null) {
     let currentContent = "";
     let lastChunkKind: "text" | "tool_call" | "thinking" | null = null;
 
-    function flush(kind: "text" | "tool_call" | "thinking") {
-      const trimmed = currentContent.trim();
-      if (!trimmed) return;
-      const id = `entry-${entryCount++}`;
-      const entry: TranscriptEntry = {
-        id,
-        content: trimmed,
-        kind,
-        timestamp: Date.now(),
-      };
-      setEntries((prev) => [...prev, entry]);
+    function flush(_kind: "text" | "tool_call" | "thinking") {
+      // The live-update path already placed an entry with id
+      // `entry-${entryCount}` into state for text/thinking chunks. All we
+      // need to do here is finalize the accumulator and advance the
+      // counter so the next entry gets a fresh id. Appending another
+      // entry here would duplicate the message in the transcript.
+      if (!currentContent.trim()) return;
+      entryCount++;
       currentContent = "";
     }
 
