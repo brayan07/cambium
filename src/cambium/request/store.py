@@ -22,7 +22,7 @@ class RequestStore:
         self._conn.executescript("""
             CREATE TABLE IF NOT EXISTS requests (
                 id TEXT PRIMARY KEY,
-                session_id TEXT NOT NULL,
+                session_id TEXT,
                 work_item_id TEXT,
                 type TEXT NOT NULL,
                 status TEXT NOT NULL DEFAULT 'pending',

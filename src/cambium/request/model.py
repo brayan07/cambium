@@ -25,7 +25,7 @@ class RequestStatus(str, Enum):
 @dataclass
 class Request:
     id: str
-    session_id: str
+    session_id: str | None
     work_item_id: str | None
     type: RequestType
     status: RequestStatus
@@ -42,7 +42,7 @@ class Request:
     @classmethod
     def create(
         cls,
-        session_id: str,
+        session_id: str | None,
         type: RequestType,
         summary: str,
         detail: str = "",
