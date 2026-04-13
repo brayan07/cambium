@@ -1,6 +1,10 @@
 import { useEffect, useRef, useMemo } from "react";
 import { useSessionStream } from "../hooks/useSessionStream";
-import { MessageList, type DisplayMessage } from "./MessageList";
+import {
+  MessageList,
+  classifyMessages,
+  type DisplayMessage,
+} from "./MessageList";
 import type { Session } from "../lib/types";
 
 interface ObservationViewProps {
@@ -11,17 +15,29 @@ export function ObservationView({ session }: ObservationViewProps) {
   const { entries, state } = useSessionStream(session.id);
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  // Map SSE entries to the shared DisplayMessage shape
-  const messages: DisplayMessage[] = useMemo(
-    () =>
-      entries.map((e) => ({
+  // Feed SSE entries through classifyMessages so live observation uses
+  // the same tool_use / tool_result / thinking renderer as the chat
+  // history view. Entries arrive with marker-tagged content (e.g.
+  // "[tool_use:toolu_abc] Task({...})") and classifyMessages parses
+  // them into DisplayMessages grouped into ToolCallGroup cards.
+  const messages: DisplayMessage[] = useMemo(() => {
+    const raw = entries.map((e) => {
+      let content = e.content;
+      // Re-synthesize the marker prefix that classifyMessages expects.
+      // Streamed text/thinking markers are stripped by the adapter
+      // already; tool_use / tool_result content arrives with markers.
+      if (e.kind === "thinking" && !content.startsWith("[thinking]")) {
+        content = `[thinking] ${content}`;
+      }
+      return {
         id: e.id,
-        content: e.content,
-        role: e.kind === "tool_call" ? "tool" as const : e.kind === "thinking" ? "thinking" as const : "assistant" as const,
-        timestamp: e.timestamp,
-      })),
-    [entries],
-  );
+        content,
+        role: "assistant" as const,
+        created_at: new Date(e.timestamp).toISOString(),
+      };
+    });
+    return classifyMessages(raw);
+  }, [entries]);
 
   useEffect(() => {
     const el = scrollRef.current;

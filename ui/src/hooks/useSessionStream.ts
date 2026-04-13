@@ -1,10 +1,17 @@
 import { useEffect, useRef, useState } from "react";
 import { API_BASE } from "../lib/api";
 
+/**
+ * A streamed transcript entry. ``kind`` maps 1:1 onto the adapter's
+ * chunk ``block_marker``: text chunks without a marker accumulate into
+ * a single text entry; chunks carrying a marker (``tool_use``,
+ * ``tool_result``, ``thinking``) each become their own standalone
+ * entry so the downstream renderer can treat them as discrete blocks.
+ */
 export interface TranscriptEntry {
   id: string;
   content: string;
-  kind: "text" | "tool_call" | "thinking";
+  kind: "text" | "thinking" | "tool_use" | "tool_result";
   timestamp: number;
 }
 
@@ -27,21 +34,18 @@ export function useSessionStream(sessionId: string | null) {
     esRef.current = es;
     setState("connecting");
 
-    // Track what the previous chunk type was so we know when to start
-    // a new entry vs. append to the current one.
+    // Rolling state for streaming text accumulation. Markered chunks
+    // bypass accumulation and push their own entry each time.
     let entryCount = 0;
-    let currentContent = "";
-    let lastChunkKind: "text" | "tool_call" | "thinking" | null = null;
+    let textBuf = "";
 
-    function flush(_kind: "text" | "tool_call" | "thinking") {
-      // The live-update path already placed an entry with id
-      // `entry-${entryCount}` into state for text/thinking chunks. All we
-      // need to do here is finalize the accumulator and advance the
-      // counter so the next entry gets a fresh id. Appending another
-      // entry here would duplicate the message in the transcript.
-      if (!currentContent.trim()) return;
+    function flushText() {
+      if (!textBuf.trim()) {
+        textBuf = "";
+        return;
+      }
       entryCount++;
-      currentContent = "";
+      textBuf = "";
     }
 
     es.onopen = () => {
@@ -50,9 +54,7 @@ export function useSessionStream(sessionId: string | null) {
 
     es.onmessage = (event) => {
       if (event.data === "[DONE]") {
-        if (currentContent.trim() && lastChunkKind) {
-          flush(lastChunkKind);
-        }
+        flushText();
         setState("done");
         es.close();
         return;
@@ -62,75 +64,57 @@ export function useSessionStream(sessionId: string | null) {
         const chunk = JSON.parse(event.data);
         const choice = chunk.choices?.[0];
         if (!choice) return;
-        const delta = choice.delta;
+        const delta = choice.delta ?? {};
+        const content: string | undefined = delta.content;
+        const blockMarker: string | undefined = choice.block_marker;
 
-        const hasContent = !!delta.content;
-        const hasToolCall = !!delta.tool_calls;
-        const isThinking = hasContent && choice.thinking;
-
-        if (hasContent) {
-          const kind: "text" | "thinking" = isThinking ? "thinking" : "text";
-
-          // If switching from a different kind, flush the previous
-          if (lastChunkKind && lastChunkKind !== kind) {
-            flush(lastChunkKind);
-          }
-
-          currentContent += delta.content;
-          lastChunkKind = kind;
-
-          // Live-update: show the current accumulating text entry
-          const liveId = `entry-${entryCount}`;
-          const liveEntry: TranscriptEntry = {
-            id: liveId,
-            content: currentContent.trim(),
-            kind,
-            timestamp: Date.now(),
-          };
-          setEntries((prev) => {
-            const idx = prev.findIndex((e) => e.id === liveId);
-            if (idx >= 0) {
-              const updated = [...prev];
-              updated[idx] = liveEntry;
-              return updated;
-            }
-            return [...prev, liveEntry];
-          });
-        } else if (hasToolCall) {
-          // Flush any accumulated text before the tool call
-          if (lastChunkKind && lastChunkKind !== "tool_call") {
-            flush(lastChunkKind);
-          }
-
-          // Extract tool name for display
-          for (const tc of delta.tool_calls) {
-            const name = tc.function?.name;
-            if (name) {
-              const toolId = `entry-${entryCount++}`;
-              setEntries((prev) => [
-                ...prev,
-                {
-                  id: toolId,
-                  content: name,
-                  kind: "tool_call",
-                  timestamp: Date.now(),
-                },
-              ]);
-            }
-          }
-          lastChunkKind = "tool_call";
-          currentContent = "";
+        if (typeof content !== "string" || content.length === 0) {
+          return;
         }
+
+        // Discrete block (tool_use / tool_result / thinking): flush any
+        // pending text first, then append this block as its own entry.
+        if (blockMarker) {
+          flushText();
+          const kind =
+            blockMarker === "tool_use"
+              ? "tool_use"
+              : blockMarker === "tool_result"
+                ? "tool_result"
+                : "thinking";
+          const id = `entry-${entryCount++}`;
+          setEntries((prev) => [
+            ...prev,
+            { id, content, kind, timestamp: Date.now() },
+          ]);
+          return;
+        }
+
+        // Streaming text delta: accumulate into the current text entry.
+        textBuf += content;
+        const liveId = `entry-${entryCount}`;
+        const liveEntry: TranscriptEntry = {
+          id: liveId,
+          content: textBuf.trim(),
+          kind: "text",
+          timestamp: Date.now(),
+        };
+        setEntries((prev) => {
+          const idx = prev.findIndex((e) => e.id === liveId);
+          if (idx >= 0) {
+            const updated = [...prev];
+            updated[idx] = liveEntry;
+            return updated;
+          }
+          return [...prev, liveEntry];
+        });
       } catch {
         // Ignore malformed chunks
       }
     };
 
     es.onerror = () => {
-      // Flush anything remaining
-      if (currentContent.trim() && lastChunkKind) {
-        flush(lastChunkKind);
-      }
+      flushText();
       setState("error");
       es.close();
     };

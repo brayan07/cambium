@@ -417,14 +417,61 @@ def _parse_stream_line(line: str) -> dict | None:
         return None
 
 
-def _make_text_chunk(chunk_id: str, model: str, text: str) -> dict[str, Any]:
+def _make_text_chunk(
+    chunk_id: str, model: str, text: str, block_marker: str | None = None
+) -> dict[str, Any]:
+    """Build a streaming text chunk.
+
+    ``block_marker`` (``"tool_use"``, ``"tool_result"``, or ``"thinking"``)
+    signals that this chunk is a discrete content block rather than a
+    streaming-text delta. The client uses it to force a flush of the
+    accumulator and render this chunk as its own transcript entry so
+    marker-tagged content like ``[tool_use:ID] Name(...)`` doesn't get
+    concatenated into the previous text entry.
+    """
+    choice: dict[str, Any] = {
+        "index": 0,
+        "delta": {"content": text},
+        "finish_reason": None,
+    }
+    if block_marker is not None:
+        choice["block_marker"] = block_marker
     return {
         "id": chunk_id,
         "object": "chat.completion.chunk",
         "created": int(time.time()),
         "model": model,
-        "choices": [{"index": 0, "delta": {"content": text}, "finish_reason": None}],
+        "choices": [choice],
     }
+
+
+def _format_tool_use(block: dict) -> str:
+    tool_id = block.get("id", "?")
+    name = block.get("name", "?")
+    return f"[tool_use:{tool_id}] {name}({json.dumps(block.get('input', {}))})"
+
+
+def _format_tool_result(block: dict) -> str:
+    tool_id = block.get("tool_use_id", "?")
+    raw = block.get("content", "")
+    if isinstance(raw, list):
+        parts: list[str] = []
+        for sub in raw:
+            if not isinstance(sub, dict):
+                continue
+            sub_type = sub.get("type")
+            if sub_type == "text":
+                parts.append(sub.get("text", ""))
+            elif sub_type == "tool_use":
+                # Nested subagent tool call; render inline
+                parts.append(_format_tool_use(sub))
+            elif sub_type == "tool_result":
+                parts.append(_format_tool_result(sub))
+            # anything else: skip quietly
+        body = "\n".join(p for p in parts if p)
+    else:
+        body = str(raw)
+    return f"[tool_result:{tool_id}] {body}"
 
 
 def _make_done_chunk(chunk_id: str, model: str) -> dict[str, Any]:
@@ -443,11 +490,17 @@ def _stream_json_to_openai(
     """Translate a Claude Code stream-json event to OpenAI chunk(s).
 
     Returns a list because some events map to zero or multiple chunks.
+
+    Every block becomes a marker-tagged text chunk. The ``block_marker``
+    field on the choice tells the client to treat the chunk as a discrete
+    transcript entry (not a streaming-text delta). Client-side
+    ``classifyMessages`` then parses ``[tool_use:ID] ...`` and
+    ``[tool_result:ID] ...`` markers into collapsible tool-call cards.
     """
     chunks: list[dict[str, Any]] = []
     event_type = event.get("type")
 
-    if event_type == "assistant" and "message" in event:
+    if event_type in ("assistant", "user") and "message" in event:
         for block in event["message"].get("content", []):
             if not isinstance(block, dict):
                 continue
@@ -461,53 +514,33 @@ def _stream_json_to_openai(
             elif block_type == "thinking":
                 text = block.get("thinking", "")
                 if text:
-                    chunk = _make_text_chunk(chunk_id, model, text)
+                    chunk = _make_text_chunk(
+                        chunk_id, model, text, block_marker="thinking"
+                    )
                     chunk["choices"][0]["thinking"] = True
                     chunks.append(chunk)
 
             elif block_type == "tool_use":
-                tool_chunk: dict[str, Any] = {
-                    "id": chunk_id,
-                    "object": "chat.completion.chunk",
-                    "created": int(time.time()),
-                    "model": model,
-                    "choices": [
-                        {
-                            "index": 0,
-                            "delta": {
-                                "tool_calls": [
-                                    {
-                                        "index": 0,
-                                        "id": block.get("id", ""),
-                                        "type": "function",
-                                        "function": {
-                                            "name": block.get("name", ""),
-                                            "arguments": json.dumps(
-                                                block.get("input", {})
-                                            ),
-                                        },
-                                    }
-                                ]
-                            },
-                            "finish_reason": None,
-                        }
-                    ],
-                }
-                chunks.append(tool_chunk)
+                chunks.append(
+                    _make_text_chunk(
+                        chunk_id,
+                        model,
+                        _format_tool_use(block),
+                        block_marker="tool_use",
+                    )
+                )
 
             elif block_type == "tool_result":
-                result_chunk: dict[str, Any] = {
-                    "id": chunk_id,
-                    "object": "chat.completion.chunk",
-                    "created": int(time.time()),
-                    "model": model,
-                    "choices": [{"index": 0, "delta": {}, "finish_reason": None}],
-                    "tool_result": {
-                        "tool_call_id": block.get("tool_use_id", ""),
-                        "content": block.get("content", ""),
-                    },
-                }
-                chunks.append(result_chunk)
+                chunks.append(
+                    _make_text_chunk(
+                        chunk_id,
+                        model,
+                        _format_tool_result(block),
+                        block_marker="tool_result",
+                    )
+                )
+
+            # Unknown block types: skip rather than leak raw JSON.
 
     # result events are NOT translated to chunks — they duplicate the
     # final assistant text. They're only used for RunResult.output.
@@ -538,49 +571,32 @@ def _to_transcript_event(event: dict) -> TranscriptEvent:
 
 
 def _extract_content(event: dict, event_type: str) -> str:
-    """Extract human-readable content from a Claude Code stream-json event."""
-    if event_type == "assistant" and "message" in event:
+    """Extract human-readable content from a Claude Code stream-json event.
+
+    Assistant and user events are both flattened into marker-tagged text
+    blocks (``[tool_use:ID] ...``, ``[tool_result:ID] ...``,
+    ``[thinking] ...``) so the REST messages endpoint and live SSE share
+    a single parseable format. Unknown block types are skipped rather
+    than serialized as raw JSON.
+    """
+    if event_type in ("assistant", "user") and "message" in event:
         parts = []
         for block in event["message"].get("content", []):
             if not isinstance(block, dict):
                 continue
             block_type = block.get("type")
             if block_type == "text":
-                parts.append(block.get("text", ""))
+                text = block.get("text", "")
+                if text:
+                    parts.append(text)
             elif block_type == "thinking":
                 parts.append(f"[thinking] {block.get('thinking', '')}")
             elif block_type == "tool_use":
-                tool_id = block.get("id", "?")
-                parts.append(
-                    f"[tool_use:{tool_id}] {block.get('name', '?')}"
-                    f"({json.dumps(block.get('input', {}))})"
-                )
+                parts.append(_format_tool_use(block))
             elif block_type == "tool_result":
-                result_content = block.get("content", "")
-                if isinstance(result_content, list):
-                    result_content = " ".join(
-                        b.get("text", "") for b in result_content if isinstance(b, dict)
-                    )
-                parts.append(f"[tool_result] {result_content}")
-        return "\n".join(parts) if parts else json.dumps(event)
-
-    if event_type == "user" and "message" in event:
-        # Tool results come back as user messages with content blocks
-        parts = []
-        for block in event["message"].get("content", []):
-            if not isinstance(block, dict):
-                continue
-            block_type = block.get("type")
-            if block_type == "tool_result":
-                result_content = block.get("content", "")
-                if isinstance(result_content, list):
-                    result_content = " ".join(
-                        b.get("text", "") for b in result_content if isinstance(b, dict)
-                    )
-                parts.append(f"[tool_result:{block.get('tool_use_id', '?')}] {result_content}")
-            else:
-                parts.append(json.dumps(block))
-        return "\n".join(parts) if parts else json.dumps(event)
+                parts.append(_format_tool_result(block))
+            # Unknown block types: skip rather than leak raw JSON.
+        return "\n".join(parts) if parts else ""
 
     if event_type == "result":
         return event.get("result", "")
