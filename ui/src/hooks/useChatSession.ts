@@ -1,17 +1,10 @@
 import { useState, useCallback, useRef, useEffect } from "react";
-import { API_BASE, apiGet } from "../lib/api";
+import { API_BASE } from "../lib/api";
+import { fetchAllMessages } from "../lib/messages";
 import type { DisplayMessage } from "../components/MessageList";
 import { classifyMessages } from "../components/MessageList";
 
 type ChatState = "idle" | "streaming" | "error";
-
-interface RawMessage {
-  id: string;
-  content: string;
-  role: string;
-  created_at: string;
-  sequence: number;
-}
 
 /**
  * Hook for interactive chat sessions.
@@ -28,7 +21,7 @@ export function useChatSession(sessionId: string) {
   // Load existing message history on mount
   useEffect(() => {
     let cancelled = false;
-    apiGet<RawMessage[]>(`/sessions/${sessionId}/messages`).then((raw) => {
+    fetchAllMessages(sessionId).then((raw) => {
       if (cancelled) return;
       const classified = classifyMessages(raw);
       setMessages(classified);
@@ -200,7 +193,7 @@ export function useChatSession(sessionId: string) {
         // Small delay ensures backend has finished persisting all messages.
         await new Promise((r) => setTimeout(r, 300));
         try {
-          const raw = await apiGet<RawMessage[]>(`/sessions/${sessionId}/messages`);
+          const raw = await fetchAllMessages(sessionId);
           const classified = classifyMessages(raw);
           setMessages(classified);
           messageCountRef.current = classified.length;

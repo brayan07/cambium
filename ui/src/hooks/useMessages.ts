@@ -1,18 +1,12 @@
 import { useQuery } from "@tanstack/react-query";
-import { apiGet } from "../lib/api";
+import { fetchAllMessages, type RawMessage } from "../lib/messages";
 
-export interface Message {
-  id: string;
-  role: string;
-  content: string;
-  created_at: string;
-  sequence: number;
-}
+export type Message = RawMessage;
 
 export function useMessages(sessionId: string | null) {
   return useQuery({
     queryKey: ["messages", sessionId],
-    queryFn: () => apiGet<Message[]>(`/sessions/${sessionId}/messages`),
+    queryFn: () => fetchAllMessages(sessionId!),
     enabled: !!sessionId,
     staleTime: 30_000,
   });
