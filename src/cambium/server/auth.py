@@ -16,13 +16,21 @@ from pydantic import BaseModel
 _SIGNING_KEY = os.urandom(32)
 
 
-def create_session_token(routine_name: str, session_id: str) -> str:
-    """Create a JWT encoding the routine and session identity."""
-    payload = {
+def create_session_token(
+    routine_name: str, session_id: str | None = None
+) -> str:
+    """Create a JWT encoding the routine and (optional) session identity.
+
+    Tokens issued for human/UI actors have no session — don't pass a
+    sentinel string, just omit it. Downstream code should read the
+    session claim with ``claims.get("session")``.
+    """
+    payload: dict[str, object] = {
         "routine": routine_name,
-        "session": session_id,
         "iat": int(time.time()),
     }
+    if session_id is not None:
+        payload["session"] = session_id
     return jwt.encode(payload, _SIGNING_KEY, algorithm="HS256")
 
 
@@ -61,7 +69,7 @@ def authenticate(authorization: str | None) -> dict:
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
-_UI_TOKEN = create_session_token("human", "ui")
+_UI_TOKEN = create_session_token("human")
 
 
 class UITokenResponse(BaseModel):

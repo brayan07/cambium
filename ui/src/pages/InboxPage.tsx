@@ -5,7 +5,11 @@ import {
   useAnswerRequest,
   useRejectRequest,
 } from "../hooks/useRequests";
-import type { Request, RequestStatus } from "../lib/types";
+import {
+  useUserTasks,
+  useCompleteWorkItem,
+} from "../hooks/useWorkItems";
+import type { Request, RequestStatus, WorkItem } from "../lib/types";
 import {
   ShieldQuestion,
   MessageSquareText,
@@ -17,6 +21,7 @@ import {
   ChevronDown,
   ChevronUp,
   ExternalLink,
+  ListTodo,
 } from "lucide-react";
 
 const STATUS_TABS: { label: string; value: RequestStatus | "all" }[] = [
@@ -53,25 +58,36 @@ export function InboxPage() {
       {/* Header */}
       <div className="flex items-center gap-4 border-b border-border px-6 py-3">
         <h1 className="font-display text-sm font-semibold text-text">Inbox</h1>
-        <div className="flex gap-1">
-          {STATUS_TABS.map((tab) => (
-            <button
-              key={tab.value}
-              onClick={() => setStatusFilter(tab.value)}
-              className={`rounded px-2.5 py-1 text-xs transition-colors ${
-                statusFilter === tab.value
-                  ? "bg-accent-dim text-accent"
-                  : "text-text-dim hover:text-text-muted"
-              }`}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </div>
       </div>
 
-      {/* Request list */}
       <div className="flex-1 overflow-y-auto">
+        {/* Tasks for you */}
+        <TasksSection />
+
+        {/* Requests subheader */}
+        <div className="flex items-center gap-3 border-b border-border bg-surface/40 px-6 py-2">
+          <ShieldQuestion size={13} className="text-text-dim" />
+          <div className="font-display text-[11px] uppercase tracking-wide text-text-muted">
+            Requests
+          </div>
+          <div className="flex gap-1">
+            {STATUS_TABS.map((tab) => (
+              <button
+                key={tab.value}
+                onClick={() => setStatusFilter(tab.value)}
+                className={`rounded px-2 py-0.5 text-[11px] transition-colors ${
+                  statusFilter === tab.value
+                    ? "bg-accent-dim text-accent"
+                    : "text-text-dim hover:text-text-muted"
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Request list */}
         {isLoading && (
           <div className="flex h-32 items-center justify-center text-sm text-text-dim">
             Loading...
@@ -244,6 +260,92 @@ function RequestCard({ request }: { request: Request }) {
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+/* --- Tasks for you --- */
+
+function TasksSection() {
+  const { data: tasks, isLoading } = useUserTasks();
+  const completeMut = useCompleteWorkItem();
+
+  if (isLoading) return null;
+  if (!tasks || tasks.length === 0) return null;
+
+  return (
+    <>
+      <div className="flex items-center gap-3 border-b border-border bg-surface/40 px-6 py-2">
+        <ListTodo size={13} className="text-text-dim" />
+        <div className="font-display text-[11px] uppercase tracking-wide text-text-muted">
+          Tasks for you
+        </div>
+        <div className="text-[10px] text-text-dim">{tasks.length}</div>
+      </div>
+      <div className="divide-y divide-border">
+        {tasks.map((task) => (
+          <TaskCard
+            key={task.id}
+            task={task}
+            onComplete={() => completeMut.mutate({ id: task.id })}
+            disabled={completeMut.isPending}
+          />
+        ))}
+      </div>
+    </>
+  );
+}
+
+function TaskCard({
+  task,
+  onComplete,
+  disabled,
+}: {
+  task: WorkItem;
+  onComplete: () => void;
+  disabled: boolean;
+}) {
+  return (
+    <div className="px-6 py-3 transition-colors">
+      <div className="flex items-center gap-3">
+        <ListTodo size={16} className="text-accent" />
+        <div className="flex-1 min-w-0">
+          <div className="text-sm text-text">{task.title}</div>
+          <div className="flex items-center gap-2 text-[10px] text-text-dim">
+            <span className="uppercase tracking-wide">{task.status}</span>
+            <span>·</span>
+            <span>priority {task.priority}</span>
+            {task.actor && (
+              <>
+                <span>·</span>
+                <span>assigned by {task.actor}</span>
+              </>
+            )}
+          </div>
+          {task.description && (
+            <p className="mt-1 text-xs leading-relaxed text-text-muted">
+              {task.description}
+            </p>
+          )}
+        </div>
+        <div className="flex flex-shrink-0 items-center gap-2">
+          <Link
+            to={`/work?item=${task.id}`}
+            className="inline-flex items-center gap-1 text-[11px] text-text-dim transition-colors hover:text-accent"
+            title="Open in work tree"
+          >
+            <ExternalLink size={11} />
+            View in tree
+          </Link>
+          <button
+            onClick={onComplete}
+            disabled={disabled}
+            className="flex items-center gap-1 rounded border border-status-active/40 bg-status-active/10 px-2.5 py-1 text-[11px] text-status-active transition-colors hover:bg-status-active/20 disabled:opacity-40"
+          >
+            <Check size={11} /> Mark Complete
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

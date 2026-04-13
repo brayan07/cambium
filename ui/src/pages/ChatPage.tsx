@@ -134,33 +134,6 @@ export function ChatPage() {
   );
 }
 
-function PausedSession({
-  session,
-  onResume,
-}: {
-  session: Session;
-  onResume: (session: Session) => void;
-}) {
-  return (
-    <div className="flex h-full flex-col items-center justify-center gap-4 text-center">
-      <div className="rounded border border-border bg-surface px-6 py-4">
-        <div className="mb-1 font-display text-sm text-text-muted">
-          {session.routine_name ?? "Session"} — paused
-        </div>
-        <p className="mb-4 text-xs text-text-dim">
-          This session is waiting for you. Resume to continue the conversation.
-        </p>
-        <button
-          onClick={() => onResume(session)}
-          className="rounded border border-accent bg-accent-dim px-4 py-2 font-display text-sm text-accent transition-colors hover:bg-accent hover:text-base"
-        >
-          Resume
-        </button>
-      </div>
-    </div>
-  );
-}
-
 function EmptyState({ onNewChat }: { onNewChat: () => void }) {
   return (
     <div className="flex h-full flex-col items-center justify-center gap-4 text-center">

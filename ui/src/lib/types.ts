@@ -70,6 +70,23 @@ export interface WorkItem {
   updated_at: string;
 }
 
+export interface ListWorkItemsResponse {
+  items: WorkItem[];
+  total: number;
+  limit: number;
+  truncated: boolean;
+}
+
+export interface WorkItemEvent {
+  id: string;
+  item_id: string;
+  event_type: string;
+  actor: string | null;
+  session_id: string | null;
+  data: Record<string, unknown>;
+  created_at: string;
+}
+
 export interface HealthResponse {
   status: string;
   consumer_running: boolean;

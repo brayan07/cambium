@@ -103,6 +103,13 @@ def create_request(
     service = _get_service()
     claims = authenticate(authorization)
 
+    session_id = claims.get("session")
+    if not session_id:
+        raise HTTPException(
+            status_code=403,
+            detail="Only routines with an active session can create requests",
+        )
+
     try:
         request_type = RequestType(body.type)
     except ValueError:
@@ -112,7 +119,7 @@ def create_request(
         )
 
     request = service.create_request(
-        session_id=claims["session"],
+        session_id=session_id,
         type=request_type,
         summary=body.summary,
         detail=body.detail,

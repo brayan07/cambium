@@ -182,7 +182,7 @@ function pairToolMessages(messages: DisplayMessage[]): { call: DisplayMessage; r
   // treat them as calls without results
   const untyped = messages.filter((m) => !m.toolType);
   for (const m of untyped) {
-    pairs.push({ call: m });
+    pairs.push({ call: m, result: undefined });
   }
 
   return pairs;
@@ -346,6 +346,3 @@ function ThinkingBlock({ content }: { content: string }) {
   );
 }
 
-function truncate(s: string, max: number): string {
-  return s.length > max ? s.slice(0, max) + "..." : s;
-}
