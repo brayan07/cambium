@@ -9,8 +9,9 @@ import {
   Folder,
   FolderOpen,
   AlertTriangle,
+  ExternalLink,
 } from "lucide-react";
-import { useFsList, useFsFile, type FsRoot } from "../hooks/useFs";
+import { useFsList, useFsFile, useFsInfo, type FsRoot } from "../hooks/useFs";
 
 interface FileBrowserProps {
   root: FsRoot;
@@ -27,6 +28,7 @@ export function FileBrowser({ root, title }: FileBrowserProps) {
   const [selected, setSelected] = useState<string | null>(null);
   const [searchParams, setSearchParams] = useSearchParams();
   const deepLinkedRef = useRef<string | null>(null);
+  const { data: info } = useFsInfo(root);
 
   // Deep link: ?path=foo/bar.md selects the file and expands its ancestors.
   useEffect(() => {
@@ -61,17 +63,37 @@ export function FileBrowser({ root, title }: FileBrowserProps) {
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
-      <div className="flex items-center gap-3 border-b border-border px-6 py-3">
-        <h1 className="font-display text-sm font-semibold text-text">
-          {title}
-        </h1>
-        <span className="font-mono text-[10px] uppercase tracking-wide text-text-dim">
-          /{root}
-        </span>
-        {selected && (
-          <span className="truncate font-mono text-[10px] text-text-muted">
-            {selected}
+      <div className="flex flex-col gap-1 border-b border-border px-6 py-3">
+        <div className="flex items-center gap-3">
+          <h1 className="font-display text-sm font-semibold text-text">
+            {title}
+          </h1>
+          <span className="font-mono text-[10px] uppercase tracking-wide text-text-dim">
+            /{root}
           </span>
+          {selected && (
+            <span className="truncate font-mono text-[10px] text-text-muted">
+              {selected}
+            </span>
+          )}
+        </div>
+        {info && (
+          <div className="flex items-center gap-3 font-mono text-[10px] text-text-dim">
+            <span className="truncate" title={info.path}>
+              {info.path}
+            </span>
+            {info.remote_url && (
+              <a
+                href={info.remote_url}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-1 text-accent hover:text-accent-hover"
+              >
+                <ExternalLink className="h-3 w-3" />
+                {info.remote_url.replace(/^https?:\/\//, "")}
+              </a>
+            )}
+          </div>
         )}
       </div>
 

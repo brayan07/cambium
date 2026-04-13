@@ -640,6 +640,50 @@ def _mount_filesystem_access(data_dir: Path, repo_dir: Path | None) -> None:
             raise HTTPException(404, f"Path not found: {path}")
         return target
 
+    def _git_remote_url(repo: Path) -> str | None:
+        """Return the https URL for `origin`, if the directory is a git repo
+        with an origin remote. Handles both https:// and git@host:owner/repo
+        forms. Returns None when the repo has no remote (e.g. memory)."""
+        import subprocess as _sp
+        git_dir = repo / ".git"
+        if not git_dir.exists():
+            return None
+        try:
+            result = _sp.run(
+                ["git", "-C", str(repo), "remote", "get-url", "origin"],
+                capture_output=True, text=True, timeout=2,
+            )
+        except (FileNotFoundError, _sp.SubprocessError):
+            return None
+        if result.returncode != 0:
+            return None
+        url = result.stdout.strip()
+        if not url:
+            return None
+        # Normalize git@github.com:owner/repo(.git) → https://github.com/owner/repo
+        if url.startswith("git@"):
+            try:
+                host, path = url[4:].split(":", 1)
+                url = f"https://{host}/{path}"
+            except ValueError:
+                return None
+        if url.endswith(".git"):
+            url = url[:-4]
+        return url
+
+    @app.get("/fs/info")
+    def fs_info(root: str):
+        """Return the absolute path and optional git remote for a root."""
+        base = roots.get(root)
+        if base is None:
+            raise HTTPException(400, f"Unknown root: {root}. Use 'memory' or 'config'.")
+        return {
+            "root": root,
+            "path": str(base.resolve()),
+            "exists": base.exists(),
+            "remote_url": _git_remote_url(base) if base.exists() else None,
+        }
+
     @app.get("/fs/ls")
     def list_directory(root: str, path: str = ""):
         """List files in memory or config directory."""

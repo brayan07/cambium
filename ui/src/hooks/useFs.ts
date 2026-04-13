@@ -21,6 +21,22 @@ export interface FsReadResponse {
   extension: string;
 }
 
+export interface FsInfoResponse {
+  root: FsRoot;
+  path: string;
+  exists: boolean;
+  remote_url: string | null;
+}
+
+/** Metadata about a root: absolute path and optional git remote URL. */
+export function useFsInfo(root: FsRoot) {
+  return useQuery({
+    queryKey: ["fs", "info", root],
+    queryFn: () => apiGet<FsInfoResponse>("/fs/info", { params: { root } }),
+    staleTime: 60_000,
+  });
+}
+
 /** List entries in a directory under the given root. */
 export function useFsList(root: FsRoot, path: string, enabled = true) {
   return useQuery({
