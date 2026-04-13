@@ -91,15 +91,27 @@ def cmd_chat(args: argparse.Namespace) -> None:
         print(f"Error: adapter type '{instance.adapter_type}' not found", file=sys.stderr)
         sys.exit(1)
 
-    session_id = str(uuid.uuid4())
+    resume = getattr(args, "resume", False)
+    session_id = getattr(args, "session_id", None) or str(uuid.uuid4())
+
+    if resume and not getattr(args, "session_id", None):
+        print("Error: --resume requires --session-id", file=sys.stderr)
+        sys.exit(1)
+
     session_dir = data_dir / "data" / "sessions" / session_id
     session_dir.mkdir(parents=True, exist_ok=True)
-    print(f"Starting chat (routine: {args.routine}, config: {config_dir}, session: {session_id[:8]})")
 
-    initial_message = args.message if args.message else "Session started."
+    action = "Resuming" if resume else "Starting"
+    print(f"{action} chat (routine: {args.routine}, config: {config_dir}, session: {session_id[:8]})")
+
+    # On resume, don't send an initial message — let the user type first
+    if resume:
+        initial_message = args.message  # only if explicitly provided
+    else:
+        initial_message = args.message if args.message else "Session started."
 
     try:
-        adapter.attach(instance, session_id, cwd=session_dir, initial_message=initial_message)
+        adapter.attach(instance, session_id, cwd=session_dir, initial_message=initial_message, resume=resume)
     except NotImplementedError as e:
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
@@ -210,6 +222,8 @@ def main() -> None:
     chat.add_argument("--repo-dir", help="Directory with code and configs (default: cwd)")
     chat.add_argument("--data-dir", help="Directory for runtime state (default: ~/.cambium)")
     chat.add_argument("-m", "--message", help="Initial message (default: 'Session started.')")
+    chat.add_argument("--session-id", help="Use a specific session ID instead of generating one")
+    chat.add_argument("--resume", action="store_true", help="Resume an existing session (requires --session-id)")
 
     # eval
     eval_parser = sub.add_parser("eval", help="Run evaluations against a staging instance")

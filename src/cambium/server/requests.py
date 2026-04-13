@@ -103,6 +103,13 @@ def create_request(
     service = _get_service()
     claims = authenticate(authorization)
 
+    session_id = claims.get("session")
+    if not session_id:
+        raise HTTPException(
+            status_code=403,
+            detail="Only routines with an active session can create requests",
+        )
+
     try:
         request_type = RequestType(body.type)
     except ValueError:
@@ -112,7 +119,7 @@ def create_request(
         )
 
     request = service.create_request(
-        session_id=claims["session"],
+        session_id=session_id,
         type=request_type,
         summary=body.summary,
         detail=body.detail,
@@ -125,21 +132,26 @@ def create_request(
     return _request_to_response(request)
 
 
+# Routines permitted to answer/reject requests on behalf of the human.
+# - "interlocutor": the chat routine the human talks through
+# - "human": the UI (direct human action, token minted at server startup)
+_HUMAN_ROUTINES = {"interlocutor", "human"}
+
+
 @router.post("/{request_id}/answer", response_model=RequestResponse)
 def answer_request(
     request_id: str,
     body: AnswerRequestRequest,
     authorization: str | None = Header(default=None),
 ):
-    """Answer a pending request. Only the interlocutor routine can answer."""
+    """Answer a pending request. Only the interlocutor or UI can answer."""
     service = _get_service()
     claims = authenticate(authorization)
 
-    # Enforce interlocutor-only access
-    if claims.get("routine") != "interlocutor":
+    if claims.get("routine") not in _HUMAN_ROUTINES:
         raise HTTPException(
             status_code=403,
-            detail="Only the interlocutor routine can answer requests",
+            detail="Only the interlocutor or UI can answer requests",
         )
 
     try:
@@ -155,14 +167,14 @@ def reject_request(
     request_id: str,
     authorization: str | None = Header(default=None),
 ):
-    """Reject a pending request. Only the interlocutor routine can reject."""
+    """Reject a pending request. Only the interlocutor or UI can reject."""
     service = _get_service()
     claims = authenticate(authorization)
 
-    if claims.get("routine") != "interlocutor":
+    if claims.get("routine") not in _HUMAN_ROUTINES:
         raise HTTPException(
             status_code=403,
-            detail="Only the interlocutor routine can reject requests",
+            detail="Only the interlocutor or UI can reject requests",
         )
 
     try:

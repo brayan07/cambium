@@ -31,6 +31,7 @@ from cambium.metric.model import load_metrics
 from cambium.metric.runner import MetricRunner
 from cambium.metric.service import MetricService
 from cambium.metric.store import ReadingStore
+from cambium.server import auth as auth_module
 from cambium.server import episodes as episodes_module
 from cambium.server import metrics as metrics_module
 from cambium.server import requests as requests_module
@@ -89,6 +90,7 @@ class CambiumServer:
         consumer: ConsumerLoop,
         timer_loop: TimerLoop | None = None,
         request_service: RequestService | None = None,
+        session_store=None,
     ) -> None:
         self.queue = queue
         self.routine_registry = routine_registry
@@ -96,6 +98,7 @@ class CambiumServer:
         self.consumer = consumer
         self.timer_loop = timer_loop
         self.request_service = request_service
+        self.session_store = session_store
         self._consumer_task: asyncio.Task | None = None
         self._timer_task: asyncio.Task | None = None
 
@@ -124,6 +127,7 @@ class CambiumServer:
 
     async def _run_consumer(self) -> None:
         loop = asyncio.get_event_loop()
+        reap_counter = 0
         while True:
             try:
                 results = await loop.run_in_executor(None, self.consumer.tick)
@@ -132,7 +136,35 @@ class CambiumServer:
                     log.info(f"Run result: {status} — {r.output[:100] if r.output else r.error}")
             except Exception:
                 log.exception("Consumer tick error")
+
+            # Reap idle interactive sessions every ~60s (30 ticks × 2s poll)
+            reap_counter += 1
+            if reap_counter >= 30:
+                reap_counter = 0
+                try:
+                    await loop.run_in_executor(None, self._reap_idle_sessions)
+                except Exception:
+                    log.exception("Session reaper error")
+
             await asyncio.sleep(self.consumer.poll_interval)
+
+    def _reap_idle_sessions(self) -> None:
+        """Mark idle interactive sessions as completed and notify the summarizer."""
+        if not self.session_store:
+            return
+        reaped = self.session_store.reap_idle_sessions(idle_seconds=600)
+        for session in reaped:
+            self.queue.publish(Message.create(
+                channel="sessions_completed",
+                payload={
+                    "session_id": session.id,
+                    "routine_name": session.routine_name,
+                    "success": True,
+                    "trigger_channel": "idle_timeout",
+                },
+                source="system",
+            ))
+            log.info(f"Reaped idle session {session.id[:8]} ({session.routine_name})")
 
     async def _run_timers(self) -> None:
         loop = asyncio.get_event_loop()
@@ -177,6 +209,22 @@ def _resolve_config_dir(repo_dir: Path) -> Path:
     if (repo_dir / "defaults" / "routines").exists():
         return repo_dir / "defaults"
     return repo_dir
+
+
+def _cleanup_zombie_sessions(session_store) -> None:
+    """Mark any 'active' or 'created' sessions as completed on startup.
+
+    If the server is starting, no sessions can be legitimately running —
+    their processes died with the previous server instance.
+    """
+    from cambium.session.model import SessionStatus
+
+    zombies = session_store.list_sessions(status=SessionStatus.ACTIVE, limit=500)
+    zombies += session_store.list_sessions(status=SessionStatus.CREATED, limit=500)
+    for s in zombies:
+        session_store.update_status(s.id, SessionStatus.COMPLETED)
+    if zombies:
+        log.info(f"Cleaned up {len(zombies)} zombie session(s) from previous server run")
 
 
 def build_server(
@@ -238,6 +286,10 @@ def build_server(
 
     # Session store (shares DB with queue)
     session_store = SessionStore(db_path)
+
+    # Clean up zombie sessions — any session still "active" from before this
+    # server started has no running process behind it.
+    _cleanup_zombie_sessions(session_store)
 
     # Episode store (shares DB with queue + sessions)
     episode_store = EpisodeStore(db_path)
@@ -312,6 +364,7 @@ def build_server(
         broadcaster_registry=broadcaster_registry,
         routine_registry=routine_registry,
         routine_runner=routine_runner,
+        queue=queue,
     )
 
     # Consumer loop
@@ -340,6 +393,9 @@ def build_server(
     timers = load_timers(config_dir / "timers.yaml")
     timer_loop = TimerLoop(timers, queue) if timers else None
 
+    # Configure terminal PTY bridge with directory paths
+    terminal_module.configure(repo_dir=repo_dir, data_dir=data_dir, session_store=session_store)
+
     log.info(f"Config dir: {config_dir}")
     log.info(f"Data dir: {data_dir}")
     log.info(f"Skills: {skill_registry.names()}")
@@ -356,6 +412,7 @@ def build_server(
         consumer=consumer,
         timer_loop=timer_loop,
         request_service=request_service,
+        session_store=session_store,
     )
 
 
@@ -378,11 +435,15 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+from cambium.server import terminal as terminal_module
+
+app.include_router(auth_module.router)
 app.include_router(episodes_module.router)
 app.include_router(metrics_module.router)
 app.include_router(requests_module.router)
 app.include_router(sessions_module.router)
 app.include_router(work_items_module.router)
+app.include_router(terminal_module.router)
 
 
 def _get_server() -> CambiumServer:
@@ -510,4 +571,75 @@ def run_server(
         db_path=db_path,
         api_base_url=f"http://{host}:{port}",
     )
+
+    # Mount filesystem access for UI (memory + config directories)
+    _mount_filesystem_access(data_dir or Path.home() / ".cambium", repo_dir)
+
+    # Mount static UI assets (production) — must be LAST (catch-all)
+    ui_dist = Path(__file__).parent.parent.parent.parent / "ui" / "dist"
+    if ui_dist.exists():
+        from starlette.staticfiles import StaticFiles
+        from starlette.responses import FileResponse
+
+        # Serve static assets (JS, CSS, images) at /assets/
+        app.mount("/assets", StaticFiles(directory=str(ui_dist / "assets")), name="ui-assets")
+
+        # SPA fallback: any unmatched GET returns index.html for client-side routing
+        index_html = ui_dist / "index.html"
+
+        @app.get("/{path:path}")
+        async def spa_fallback(path: str):
+            # Don't intercept API routes — only serve static files and SPA fallback
+            # for paths that don't match any registered API endpoints.
+            static_path = ui_dist / path
+            if static_path.is_file() and ".." not in path:
+                return FileResponse(str(static_path))
+            return FileResponse(str(index_html))
+
+        log.info(f"Serving UI from {ui_dist}")
+
     uvicorn.run(app, host=host, port=port, log_level=log_level)
+
+
+def _mount_filesystem_access(data_dir: Path, repo_dir: Path | None) -> None:
+    """Mount read-only filesystem endpoints for the UI."""
+    import os as _os
+    from starlette.staticfiles import StaticFiles
+
+    memory_dir = data_dir / "memory"
+    config_dir = _resolve_config_dir(repo_dir or Path.cwd())
+
+    if memory_dir.exists():
+        app.mount("/memory", StaticFiles(directory=str(memory_dir)), name="memory")
+    if config_dir.exists():
+        app.mount("/config", StaticFiles(directory=str(config_dir)), name="config")
+
+    @app.get("/fs/ls")
+    def list_directory(root: str, path: str = ""):
+        """List files in memory or config directory."""
+        roots = {"memory": memory_dir, "config": config_dir}
+        base = roots.get(root)
+        if base is None:
+            raise HTTPException(400, f"Unknown root: {root}. Use 'memory' or 'config'.")
+
+        target = (base / path).resolve()
+        # Path traversal protection
+        if not str(target).startswith(str(base.resolve())):
+            raise HTTPException(403, "Path traversal not allowed")
+        if not target.exists():
+            raise HTTPException(404, f"Path not found: {path}")
+        if not target.is_dir():
+            raise HTTPException(400, f"Not a directory: {path}")
+
+        entries = []
+        for entry in sorted(target.iterdir()):
+            if entry.name.startswith("."):
+                continue
+            stat = entry.stat()
+            entries.append({
+                "name": entry.name,
+                "type": "dir" if entry.is_dir() else "file",
+                "size": stat.st_size if entry.is_file() else None,
+                "modified": stat.st_mtime,
+            })
+        return {"entries": entries}

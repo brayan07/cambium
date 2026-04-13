@@ -1,0 +1,166 @@
+@import "tailwindcss";
+
+@theme {
+  --color-base: #0a0a0f;
+  --color-surface: #14141f;
+  --color-surface-raised: #1a1a2a;
+  --color-border: #1e1e2e;
+  --color-border-subtle: #16161f;
+  --color-text: #e0e0e8;
+  --color-text-muted: #8888a0;
+  --color-text-dim: #555570;
+  --color-accent: #d4a843;
+  --color-accent-dim: #d4a84333;
+  --color-accent-hover: #e0b850;
+
+  --color-status-active: #4ade80;
+  --color-status-paused: #d4a843;
+  --color-status-failed: #ef4444;
+  --color-status-completed: #60a5fa;
+  --color-status-info: #60a5fa;
+
+  --font-display: "JetBrains Mono", monospace;
+  --font-body: "IBM Plex Sans", sans-serif;
+  --font-mono: "JetBrains Mono", monospace;
+}
+
+body {
+  font-family: var(--font-body);
+  margin: 0;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  font-family: var(--font-display);
+}
+
+/* Scrollbar styling for dark theme */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-text-dim);
+}
+
+/* Markdown prose styling for session messages */
+.prose-cambium {
+  font-family: var(--font-body);
+  font-size: 0.8125rem;
+  line-height: 1.6;
+  color: var(--color-text);
+}
+
+.prose-cambium h1,
+.prose-cambium h2,
+.prose-cambium h3,
+.prose-cambium h4 {
+  font-family: var(--font-display);
+  font-weight: 600;
+  margin-top: 1em;
+  margin-bottom: 0.4em;
+  color: var(--color-text);
+}
+
+.prose-cambium h1 { font-size: 1.1rem; }
+.prose-cambium h2 { font-size: 1rem; }
+.prose-cambium h3 { font-size: 0.9rem; }
+
+.prose-cambium p {
+  margin: 0.4em 0;
+}
+
+.prose-cambium ul,
+.prose-cambium ol {
+  margin: 0.4em 0;
+  padding-left: 1.5em;
+}
+
+.prose-cambium li {
+  margin: 0.15em 0;
+}
+
+.prose-cambium strong {
+  color: var(--color-text);
+  font-weight: 600;
+}
+
+.prose-cambium em {
+  color: var(--color-text-muted);
+}
+
+.prose-cambium code {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  background: var(--color-surface-raised);
+  border: 1px solid var(--color-border);
+  border-radius: 3px;
+  padding: 0.1em 0.35em;
+}
+
+.prose-cambium pre {
+  background: var(--color-surface-raised);
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  padding: 0.75em 1em;
+  margin: 0.5em 0;
+  overflow-x: auto;
+}
+
+.prose-cambium pre code {
+  background: none;
+  border: none;
+  padding: 0;
+}
+
+.prose-cambium a {
+  color: var(--color-accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.prose-cambium blockquote {
+  border-left: 2px solid var(--color-accent-dim);
+  padding-left: 0.75em;
+  margin: 0.5em 0;
+  color: var(--color-text-muted);
+}
+
+.prose-cambium hr {
+  border: none;
+  border-top: 1px solid var(--color-border);
+  margin: 0.75em 0;
+}
+
+.prose-cambium table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.75rem;
+  margin: 0.5em 0;
+}
+
+.prose-cambium th,
+.prose-cambium td {
+  border: 1px solid var(--color-border);
+  padding: 0.3em 0.6em;
+  text-align: left;
+}
+
+.prose-cambium th {
+  background: var(--color-surface-raised);
+  font-weight: 600;
+}

@@ -1,0 +1,151 @@
+import { useState, useCallback, useEffect, useRef } from "react";
+import { useSearchParams } from "react-router";
+import { SessionList } from "../components/SessionList";
+import { ChatView } from "../components/ChatView";
+import { ObservationView } from "../components/ObservationView";
+import { SessionHistory } from "../components/SessionHistory";
+import { apiGet, apiPost } from "../lib/api";
+import type { Session } from "../lib/types";
+
+/**
+ * View state for the main content area.
+ *
+ * User sessions use ChatView (structured message exchange via REST/SSE).
+ * System sessions use ObservationView (read-only SSE stream).
+ * Completed sessions use SessionHistory (REST message history).
+ */
+type ViewState =
+  | { mode: "empty" }
+  | { mode: "browse"; session: Session }
+  | { mode: "chat"; session: Session };
+
+export function ChatPage() {
+  const [view, setView] = useState<ViewState>({ mode: "empty" });
+  const [searchParams] = useSearchParams();
+  const processedRef = useRef<string | null>(null);
+
+  // Deep-link: if the URL has ?session=<id>, fetch the session and open it.
+  // Used by the inbox to link back to the session a request came from.
+  //
+  // We track processed IDs in a ref so navigating to the same ?session=<id>
+  // twice in a row is idempotent without clearing the query param (which
+  // caused a re-render race with setView).
+  useEffect(() => {
+    const sessionId = searchParams.get("session");
+    if (!sessionId || processedRef.current === sessionId) return;
+    processedRef.current = sessionId;
+
+    apiGet<Session>(`/sessions/${sessionId}`)
+      .then((session) => {
+        setView({ mode: "browse", session });
+      })
+      .catch((err) => {
+        console.error("Failed to load session:", err);
+        processedRef.current = null;
+      });
+  }, [searchParams]);
+
+  const handleSelectSession = useCallback(
+    (session: Session) => {
+      // If we're in an active chat, clicking the same session is a no-op
+      if (view.mode === "chat" && view.session.id === session.id) return;
+      // Clicking a different session while chatting — leave the chat
+      setView({ mode: "browse", session });
+    },
+    [view],
+  );
+
+  const handleNewChat = useCallback(async () => {
+    try {
+      const session = await apiPost<Session>("/sessions", {
+        routine_name: "interlocutor",
+      });
+      setView({ mode: "chat", session });
+    } catch (err) {
+      console.error("Failed to create session:", err);
+    }
+  }, []);
+
+  const handleResume = useCallback((session: Session) => {
+    setView({ mode: "chat", session });
+  }, []);
+
+  const handleEndSession = useCallback(() => {
+    setView({ mode: "empty" });
+  }, []);
+
+  // --- Derived state ---
+
+  const selectedId =
+    view.mode === "empty" ? null : view.session.id;
+
+  // --- Render ---
+
+  const renderMainContent = () => {
+    switch (view.mode) {
+      case "chat":
+        return <ChatView key={view.session.id} session={view.session} onEnd={handleEndSession} />;
+
+      case "browse": {
+        const { session } = view;
+        // Active system session → observation
+        if (session.status === "active" && session.origin === "system") {
+          return <ObservationView session={session} />;
+        }
+        // User session that's still chattable (created or active) → ChatView.
+        // "created" means the session exists but no message has been sent
+        // yet; the user should be able to type the first one.
+        if (
+          session.origin === "user" &&
+          (session.status === "active" || session.status === "created")
+        ) {
+          return (
+            <ChatView
+              key={session.id}
+              session={session}
+              onEnd={handleEndSession}
+            />
+          );
+        }
+        // Completed/failed session → history with resume option
+        return (
+          <SessionHistory session={session} onResume={handleResume} />
+        );
+      }
+
+      default:
+        return <EmptyState onNewChat={handleNewChat} />;
+    }
+  };
+
+  return (
+    <div className="flex h-full">
+      <div className="w-72 flex-shrink-0">
+        <SessionList
+          selectedId={selectedId}
+          onSelect={handleSelectSession}
+          onNewChat={handleNewChat}
+        />
+      </div>
+      <div className="flex flex-1 flex-col overflow-hidden">
+        {renderMainContent()}
+      </div>
+    </div>
+  );
+}
+
+function EmptyState({ onNewChat }: { onNewChat: () => void }) {
+  return (
+    <div className="flex h-full flex-col items-center justify-center gap-4 text-center">
+      <div className="font-display text-lg text-text-dim">
+        Select a session or start a new chat
+      </div>
+      <button
+        onClick={onNewChat}
+        className="rounded border border-accent bg-accent-dim px-4 py-2 font-display text-sm text-accent transition-colors hover:bg-accent hover:text-base"
+      >
+        + New Chat
+      </button>
+    </div>
+  );
+}
