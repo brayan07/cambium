@@ -278,7 +278,13 @@ def build_server(
     mcp_registry = FileRegistry(config_dir / "mcp-servers.json")
 
     # Adapter types — pass config_dir so prompts resolve correctly
-    claude_adapter = ClaudeCodeAdapter(skill_registry, user_dir=config_dir, mcp_registry=mcp_registry, data_dir=data_dir)
+    claude_adapter = ClaudeCodeAdapter(
+        skill_registry,
+        user_dir=config_dir,
+        mcp_registry=mcp_registry,
+        data_dir=data_dir,
+        repo_dir=repo_dir,
+    )
     adapter_types = {claude_adapter.name: claude_adapter}
 
     # Routine registry

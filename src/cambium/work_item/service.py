@@ -7,6 +7,7 @@ from typing import Any
 
 from cambium.models.message import Message
 from cambium.queue.base import QueueAdapter
+from cambium.work_item.classifier import auto_classify
 from cambium.work_item.model import (
     CompletionMode,
     RollupMode,
@@ -44,6 +45,11 @@ class WorkItemService:
         assigned_to: str | None = None,
         session_id: str | None = None,
     ) -> WorkItem:
+        # Auto-classify as self-improvement when the proposed work targets
+        # repo paths that must flow through the worktree+PR pipeline. See
+        # cambium.work_item.classifier for the path rules. Fix (a) for #30.
+        classified_context = auto_classify(title, description, context)
+
         item = WorkItem.create(
             title=title,
             description=description,
@@ -52,12 +58,17 @@ class WorkItemService:
             completion_mode=completion_mode,
             rollup_mode=rollup_mode,
             depends_on=depends_on,
-            context=context,
+            context=classified_context,
             max_attempts=max_attempts,
             actor=actor,
             assigned_to=assigned_to,
             session_id=session_id,
         )
+        if classified_context.get("auto_classified"):
+            logger.info(
+                "Auto-classified work item %s as self_improvement (targets: %s)",
+                item.id, classified_context.get("classified_targets"),
+            )
         self.store.create(item)
         self.queue.publish(Message.create(
             channel="plans",
