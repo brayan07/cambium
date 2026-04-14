@@ -36,11 +36,16 @@ class ClaudeCodeAdapter(AdapterType):
         user_dir: Path | None = None,
         mcp_registry: MCPRegistry | None = None,
         data_dir: Path | None = None,
+        repo_dir: Path | None = None,
     ) -> None:
         self.skill_registry = skill_registry
         self.user_dir = user_dir
         self.mcp_registry = mcp_registry
         self.data_dir = data_dir
+        # repo_dir is the user's live source tree. When set, every spawned
+        # claude-code subprocess gets a PreToolUse hook that refuses Edit/
+        # Write inside this path — defense-in-depth for #30.
+        self.repo_dir = repo_dir
 
     def send_message(
         self,
@@ -91,6 +96,9 @@ class ClaudeCodeAdapter(AdapterType):
     ) -> RunResult:
         start = time.monotonic()
         tmp_dir = None
+        mcp_cwd: Path | None = None
+        mcp_config_path: Path | None = None
+        settings_path: Path | None = None
         config = instance.config
 
         try:
@@ -105,6 +113,11 @@ class ClaudeCodeAdapter(AdapterType):
                 mcp_cwd = Path(tempfile.mkdtemp(prefix="cambium-mcp-"))
                 cwd = mcp_cwd
             mcp_config_path = self._resolve_mcp_servers(config, cwd)
+
+            # Install protect-repo PreToolUse hook into cwd. Defense-in-depth
+            # for #30 — refuses Edit/Write inside CAMBIUM_REPO_DIR even when
+            # the self-improvement skill never fires.
+            settings_path = self._install_protect_repo_hook(cwd)
 
             system_prompt = self._load_system_prompt(config)
             prompt_file = Path(tmp_dir) / "system-prompt.md"
@@ -141,6 +154,8 @@ class ClaudeCodeAdapter(AdapterType):
                 env["CAMBIUM_CONFIG_DIR"] = str(self.user_dir)
             if self.data_dir:
                 env["CAMBIUM_DATA_DIR"] = str(self.data_dir)
+            if self.repo_dir:
+                env["CAMBIUM_REPO_DIR"] = str(self.repo_dir)
 
             log.info(
                 f"{'Resuming' if resume else 'Starting'} session '{session_id[:8]}' "
@@ -249,6 +264,8 @@ class ClaudeCodeAdapter(AdapterType):
             elif mcp_config_path and mcp_config_path.exists():
                 # Clean up .mcp.json from caller-provided cwd
                 mcp_config_path.unlink(missing_ok=True)
+            if settings_path and settings_path.exists():
+                settings_path.unlink(missing_ok=True)
 
     @staticmethod
     def _build_stream_json_input(text: str, image_data_urls: list[str]) -> str:
@@ -288,6 +305,54 @@ class ClaudeCodeAdapter(AdapterType):
             },
         }
         return json.dumps(msg) + "\n"
+
+    def _install_protect_repo_hook(self, cwd: Path) -> Path | None:
+        """Write a Claude Code settings.json into ``cwd`` that registers a
+        PreToolUse hook refusing Edit/Write inside the live Cambium repo.
+
+        Defense-in-depth for brayan07/cambium#30. If ``self.repo_dir`` is None
+        or the hook script can't be located, this is a no-op (returns None).
+        Otherwise returns the path of the written settings.json so the caller
+        can clean it up after the subprocess exits.
+
+        The hook reads ``CAMBIUM_REPO_DIR`` from its environment, so the
+        adapter must also export that env var to the subprocess (handled in
+        ``_live_send`` and ``attach``).
+        """
+        if not self.repo_dir or not self.user_dir:
+            return None
+
+        hook_script = (
+            self.user_dir / "adapters" / "claude-code" / "hooks" / "protect-repo.py"
+        )
+        if not hook_script.exists():
+            log.warning(
+                "protect-repo hook script not found at %s — guardrail disabled",
+                hook_script,
+            )
+            return None
+
+        settings_dir = cwd / ".claude"
+        settings_dir.mkdir(parents=True, exist_ok=True)
+        settings_path = settings_dir / "settings.json"
+
+        settings = {
+            "hooks": {
+                "PreToolUse": [
+                    {
+                        "matcher": "Edit|Write|MultiEdit|NotebookEdit",
+                        "hooks": [
+                            {
+                                "type": "command",
+                                "command": f"python3 {hook_script}",
+                            }
+                        ],
+                    }
+                ]
+            }
+        }
+        settings_path.write_text(json.dumps(settings, indent=2))
+        return settings_path
 
     def _resolve_mcp_servers(self, config: dict, target_dir: Path) -> Path | None:
         """Resolve named MCP servers and write .mcp.json into target_dir.
@@ -398,6 +463,11 @@ class ClaudeCodeAdapter(AdapterType):
             os.environ["CAMBIUM_CONFIG_DIR"] = str(self.user_dir)
         if self.data_dir:
             os.environ["CAMBIUM_DATA_DIR"] = str(self.data_dir)
+        if self.repo_dir:
+            os.environ["CAMBIUM_REPO_DIR"] = str(self.repo_dir)
+            # Install protect-repo hook for the interactive session too
+            if cwd:
+                self._install_protect_repo_hook(cwd)
         if cwd:
             os.chdir(cwd)
         os.execvp("claude", cmd)

@@ -19,7 +19,14 @@ Accepted items trigger rollup (parent auto-completes if all children are done). 
 
 ## Self-Improvement Reviews
 
-Work items from the self-improvement loop (description contains `SELF-IMPROVEMENT TASK`) require additional scrutiny. Read `references/review.md` in the `cambium-self-improvement` skill for the specific checks and red flags for each task type.
+Work items from the self-improvement loop (description contains `SELF-IMPROVEMENT TASK`, OR `context.type == "self_improvement"`, OR `context.auto_classified == true`) require additional scrutiny. Read `references/review.md` in the `cambium-self-improvement` skill for the specific checks and red flags for each task type.
+
+**Always run the PR-flow check** for any task whose result claims to have
+edited files under `src/`, `tests/`, `defaults/`, `ui/src/`, or any tunable
+file. The executor must apply changes via `git worktree add` + `gh pr create`,
+not direct edits to the live tree. If the result has no PR URL and
+`git -C "$CAMBIUM_REPO_DIR" status --porcelain` shows uncommitted changes,
+reject with feedback to redo the work via a worktree and PR.
 
 ## Review Principles
 - Be specific — "this is wrong" is not useful feedback. Say what's missing or incorrect.
