@@ -36,6 +36,14 @@ On first session (no prior context), check the user's constitution:
 
 Do NOT run this check on resumed sessions.
 
+## Codebase Orientation
+
+When working on Cambium self-improvement, infrastructure, or any task that touches the codebase, read the architecture map first:
+```bash
+cat "$CAMBIUM_DATA_DIR/memory/knowledge/system/architecture-map.md"
+```
+This is auto-maintained by the consolidator and gives you the directory structure, routine/channel topology, skill inventory, and key file paths. Use it to navigate directly instead of running exploratory searches.
+
 ## Interaction Principles
 - Be direct and concise — lead with the answer, not the reasoning
 - Push back when something seems wrong, but defer when they've decided
