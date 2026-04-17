@@ -187,8 +187,23 @@ class SessionStore:
                 for r in rows
             ]
 
-    def add_message(self, message: SessionMessage) -> None:
+    def touch(self, session_id: str) -> None:
+        """Update ``updated_at`` without changing anything else — lightweight heartbeat."""
+        from datetime import datetime, timezone
+
         with self._lock:
+            now = datetime.now(timezone.utc).isoformat()
+            self._conn.execute(
+                "UPDATE sessions SET updated_at = ? WHERE id = ?",
+                (now, session_id),
+            )
+            self._conn.commit()
+
+    def add_message(self, message: SessionMessage) -> None:
+        from datetime import datetime, timezone
+
+        with self._lock:
+            now = datetime.now(timezone.utc).isoformat()
             self._conn.execute(
                 "INSERT INTO session_messages (id, session_id, role, content, "
                 "created_at, sequence, metadata) VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -201,6 +216,10 @@ class SessionStore:
                     message.sequence,
                     json.dumps(message.metadata),
                 ),
+            )
+            self._conn.execute(
+                "UPDATE sessions SET updated_at = ? WHERE id = ?",
+                (now, message.session_id),
             )
             self._conn.commit()
 

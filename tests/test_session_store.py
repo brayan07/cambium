@@ -1,5 +1,7 @@
 """Tests for session store."""
 
+from datetime import datetime, timezone, timedelta
+
 from cambium.session.model import Session, SessionMessage, SessionStatus, SessionOrigin
 from cambium.session.store import SessionStore
 
@@ -184,3 +186,92 @@ class TestSessionMessages:
 
         messages = store.get_messages(session.id)
         assert messages[0].metadata["tokens"] == 150
+
+
+class TestSessionActivityTracking:
+    """Tests for touch(), add_message updated_at refresh, and reap interaction."""
+
+    def test_touch_updates_updated_at(self):
+        store = SessionStore()
+        session = Session.create(origin=SessionOrigin.USER)
+        store.create_session(session)
+        original = store.get_session(session.id).updated_at
+
+        store.touch(session.id)
+
+        got = store.get_session(session.id)
+        assert got.updated_at >= original
+
+    def test_add_message_updates_session_updated_at(self):
+        store = SessionStore()
+        session = Session.create(origin=SessionOrigin.USER)
+        store.create_session(session)
+        original = store.get_session(session.id).updated_at
+
+        msg = SessionMessage.create(session.id, "user", "hello", sequence=0)
+        store.add_message(msg)
+
+        got = store.get_session(session.id)
+        assert got.updated_at >= original
+
+    def test_reap_spares_recently_touched_session(self):
+        store = SessionStore()
+        session = Session.create(origin=SessionOrigin.USER)
+        store.create_session(session)
+        store.update_status(session.id, SessionStatus.ACTIVE)
+
+        # Backdate updated_at to make it look idle
+        old_time = (datetime.now(timezone.utc) - timedelta(seconds=700)).isoformat()
+        store._conn.execute(
+            "UPDATE sessions SET updated_at = ? WHERE id = ?",
+            (old_time, session.id),
+        )
+        store._conn.commit()
+
+        # Touch to refresh — simulates a keepalive
+        store.touch(session.id)
+
+        reaped = store.reap_idle_sessions(idle_seconds=600)
+        assert len(reaped) == 0
+        assert store.get_session(session.id).status == SessionStatus.ACTIVE
+
+    def test_reap_spares_session_with_recent_message(self):
+        store = SessionStore()
+        session = Session.create(origin=SessionOrigin.USER)
+        store.create_session(session)
+        store.update_status(session.id, SessionStatus.ACTIVE)
+
+        # Backdate updated_at
+        old_time = (datetime.now(timezone.utc) - timedelta(seconds=700)).isoformat()
+        store._conn.execute(
+            "UPDATE sessions SET updated_at = ? WHERE id = ?",
+            (old_time, session.id),
+        )
+        store._conn.commit()
+
+        # Add a message — should refresh updated_at
+        msg = SessionMessage.create(session.id, "user", "still here", sequence=0)
+        store.add_message(msg)
+
+        reaped = store.reap_idle_sessions(idle_seconds=600)
+        assert len(reaped) == 0
+        assert store.get_session(session.id).status == SessionStatus.ACTIVE
+
+    def test_reap_still_catches_truly_idle_sessions(self):
+        store = SessionStore()
+        session = Session.create(origin=SessionOrigin.USER)
+        store.create_session(session)
+        store.update_status(session.id, SessionStatus.ACTIVE)
+
+        # Backdate updated_at and don't touch or add messages
+        old_time = (datetime.now(timezone.utc) - timedelta(seconds=700)).isoformat()
+        store._conn.execute(
+            "UPDATE sessions SET updated_at = ? WHERE id = ?",
+            (old_time, session.id),
+        )
+        store._conn.commit()
+
+        reaped = store.reap_idle_sessions(idle_seconds=600)
+        assert len(reaped) == 1
+        assert reaped[0].id == session.id
+        assert store.get_session(session.id).status == SessionStatus.COMPLETED
