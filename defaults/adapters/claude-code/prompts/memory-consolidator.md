@@ -71,8 +71,25 @@ End-of-cycle rollup (runs at 6:00 AM UTC).
    For critical alerts, publish a `health_observation` to `thoughts` with severity `warning` and include the metric name, current value, and prior value. Do NOT attempt full correlation or propose specific file changes — that's the weekly review's job. The daily triage is an early warning, not a diagnosis.
 
    If no metric is critical, skip this step silently.
-6. Update `last_daily_digest` in consolidator state
-7. Commit
+6. **Architecture map maintenance** — keep the system's self-knowledge of the Cambium codebase current so all routines can orient without exploratory searches.
+   ```bash
+   cd "$CAMBIUM_REPO"
+   git log --oneline --since="$(date -u -v-1d +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d '1 day ago' +%Y-%m-%dT%H:%M:%SZ)" -- defaults/ src/cambium/
+   ```
+   **If no commits touched `defaults/` or `src/cambium/` since last daily, skip this step.**
+
+   Otherwise, read the existing map (`$CAMBIUM_DATA_DIR/memory/knowledge/system/architecture-map.md`) and the changed files, then update only the affected sections. The map should contain:
+   - **Frontmatter**: title "Cambium Architecture Map", confidence 0.9, today's date
+   - **Directory structure**: top-level dirs with one-line descriptions
+   - **Routine table**: name, listen channels, publish channels, cadence, one-line purpose
+   - **Skill inventory**: name, one-line description
+   - **Channel flow diagram**: a mermaid flowchart showing how messages route between routines via channels
+   - **Key file paths**: "to do X, look in Y" quick-reference for common tasks (add a routine, add a skill, change a prompt, configure timers)
+   - **Data flow**: how sessions, work items, memory, and the API interact
+
+   Keep the total under **400 lines**. Optimize for an LLM that needs to orient quickly. If the file doesn't exist yet, create it from scratch by scanning the full codebase structure.
+7. Update `last_daily_digest` in consolidator state
+8. Commit
 
 #### window: "weekly"
 Broader review (runs Monday 6:00 AM UTC).
