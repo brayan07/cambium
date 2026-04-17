@@ -29,6 +29,9 @@ router = APIRouter(prefix="/terminal", tags=["terminal"])
 IDLE_TIMEOUT = 15 * 60
 
 
+_DB_TOUCH_INTERVAL = 120  # seconds between DB heartbeats
+
+
 @dataclass
 class PtySession:
     """A PTY process linked to a Cambium session."""
@@ -37,6 +40,7 @@ class PtySession:
     pid: int
     fd: int  # PTY master file descriptor
     last_input: float = field(default_factory=time.time)
+    last_db_touch: float = field(default_factory=time.time)
 
     def resize(self, rows: int, cols: int) -> None:
         """Send TIOCSWINSZ to the PTY."""
@@ -86,6 +90,20 @@ def configure(
     _repo_dir = repo_dir
     _data_dir = data_dir
     _session_store = session_store
+
+
+def _touch_session_db(session: PtySession) -> None:
+    """Update session updated_at in DB if enough time has passed."""
+    now = time.time()
+    if now - session.last_db_touch < _DB_TOUCH_INTERVAL:
+        return
+    session.last_db_touch = now
+    if _session_store is None:
+        return
+    try:
+        _session_store.touch(session.session_id)
+    except Exception:
+        log.debug(f"Failed to touch session {session.session_id[:8]} in DB")
 
 
 @router.websocket("/new")
@@ -268,6 +286,7 @@ async def _bridge(ws: WebSocket, session: PtySession) -> bool:
                             continue
                         if event.get("type") == "keepalive":
                             session.last_input = time.time()
+                            _touch_session_db(session)
                             continue
                     except json.JSONDecodeError:
                         pass
@@ -280,6 +299,7 @@ async def _bridge(ws: WebSocket, session: PtySession) -> bool:
             except OSError:
                 break
             session.last_input = time.time()
+            _touch_session_db(session)
 
     async def idle_watchdog() -> None:
         """Kill PTY after IDLE_TIMEOUT seconds of no input."""
