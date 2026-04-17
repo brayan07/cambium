@@ -71,15 +71,14 @@ End-of-cycle rollup (runs at 6:00 AM UTC).
    For critical alerts, publish a `health_observation` to `thoughts` with severity `warning` and include the metric name, current value, and prior value. Do NOT attempt full correlation or propose specific file changes — that's the weekly review's job. The daily triage is an early warning, not a diagnosis.
 
    If no metric is critical, skip this step silently.
-6. **Architecture map regeneration** — rebuild the system's self-knowledge of the Cambium codebase so all routines can orient without exploratory searches.
+6. **Architecture map maintenance** — keep the system's self-knowledge of the Cambium codebase current so all routines can orient without exploratory searches.
    ```bash
-   # Scan the codebase structure
    cd "$CAMBIUM_REPO"
-   find defaults/ src/ -type f | head -200
-   ls defaults/routines/ defaults/adapters/claude-code/instances/ defaults/adapters/claude-code/skills/
-   cat defaults/timers.yaml
+   git log --oneline --since="$(date -u -v-1d +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d '1 day ago' +%Y-%m-%dT%H:%M:%SZ)" -- defaults/ src/cambium/
    ```
-   Read enough of the codebase to produce an accurate, concise architecture map. Then write or overwrite `$CAMBIUM_DATA_DIR/memory/knowledge/system/architecture-map.md` with:
+   **If no commits touched `defaults/` or `src/cambium/` since last daily, skip this step.**
+
+   Otherwise, read the existing map (`$CAMBIUM_DATA_DIR/memory/knowledge/system/architecture-map.md`) and the changed files, then update only the affected sections. The map should contain:
    - **Frontmatter**: title "Cambium Architecture Map", confidence 0.9, today's date
    - **Directory structure**: top-level dirs with one-line descriptions
    - **Routine table**: name, listen channels, publish channels, cadence, one-line purpose
@@ -88,7 +87,7 @@ End-of-cycle rollup (runs at 6:00 AM UTC).
    - **Key file paths**: "to do X, look in Y" quick-reference for common tasks (add a routine, add a skill, change a prompt, configure timers)
    - **Data flow**: how sessions, work items, memory, and the API interact
 
-   Keep the total under **400 lines**. This is a working reference, not documentation — optimize for an LLM that needs to orient quickly. If the file already exists, regenerate it completely (it's auto-maintained, not hand-edited).
+   Keep the total under **400 lines**. Optimize for an LLM that needs to orient quickly. If the file doesn't exist yet, create it from scratch by scanning the full codebase structure.
 7. Update `last_daily_digest` in consolidator state
 8. Commit
 
