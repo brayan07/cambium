@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
@@ -247,18 +248,11 @@ async def stream_session(session_id: str):
     broadcaster = broadcaster_reg.get(session_id)
     if broadcaster is None:
         if session.status in (SessionStatus.COMPLETED, SessionStatus.FAILED):
-            # Session is done, replay stored messages as a single response
             messages = store.get_messages(session_id)
             async def replay():
+                chunk_id = f"chatcmpl-{session_id[:12]}"
                 for m in messages:
-                    if m.role == "assistant":
-                        chunk = {
-                            "id": f"chatcmpl-{session_id[:12]}",
-                            "object": "chat.completion.chunk",
-                            "created": 0,
-                            "model": "unknown",
-                            "choices": [{"index": 0, "delta": {"content": m.content}, "finish_reason": None}],
-                        }
+                    for chunk in _message_to_chunks(m.content, m.role, chunk_id):
                         yield f"data: {json.dumps(chunk)}\n\n"
                 yield "data: [DONE]\n\n"
             return StreamingResponse(replay(), media_type="text/event-stream")
@@ -324,6 +318,57 @@ def delete_session(session_id: str):
         ))
 
     log.info(f"Session {session_id[:8]} ended")
+
+
+_BLOCK_SPLIT_RE = re.compile(r"\n(?=\[(?:tool_use|tool_result[^\]]*|thinking)\]\s)")
+
+
+def _message_to_chunks(
+    content: str, role: str, chunk_id: str
+) -> list[dict[str, Any]]:
+    """Convert a stored DB message into properly tagged OpenAI chunks.
+
+    Splits marker-tagged content (``[tool_use:ID] ...``, ``[tool_result:ID] ...``,
+    ``[thinking] ...``) into individual chunks with ``block_marker`` so the
+    frontend classifies them correctly — matching the live-stream format
+    produced by ``_stream_json_to_openai`` in the adapter.
+    """
+    if role not in ("assistant", "user"):
+        return []
+
+    blocks = _BLOCK_SPLIT_RE.split(content)
+    chunks: list[dict[str, Any]] = []
+    for block in blocks:
+        block = block.strip()
+        if not block:
+            continue
+
+        marker: str | None = None
+        if block.startswith("[tool_use"):
+            marker = "tool_use"
+        elif block.startswith("[tool_result"):
+            marker = "tool_result"
+        elif block.startswith("[thinking]"):
+            marker = "thinking"
+
+        choice: dict[str, Any] = {
+            "index": 0,
+            "delta": {"content": block},
+            "finish_reason": None,
+        }
+        if marker is not None:
+            choice["block_marker"] = marker
+        if marker == "thinking":
+            choice["thinking"] = True
+
+        chunks.append({
+            "id": chunk_id,
+            "object": "chat.completion.chunk",
+            "created": 0,
+            "model": "replay",
+            "choices": [choice],
+        })
+    return chunks
 
 
 def _session_to_response(session: Session) -> SessionResponse:

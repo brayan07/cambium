@@ -103,52 +103,14 @@ export function useChatSession(sessionId: string) {
               if (!choice) continue;
               const delta = choice.delta;
 
-              if (delta.content) {
-                const isThinking = !!choice.thinking;
-                const kind = isThinking ? "thinking" : "text";
+              if (!delta.content) continue;
 
-                // If switching kind, flush the previous block
-                if (currentKind && currentKind !== kind && assistantContent.trim()) {
-                  const role = currentKind === "thinking" ? "thinking" as const : "assistant" as const;
-                  const flushedId = assistantId;
-                  setMessages((prev) => {
-                    const filtered = prev.filter((m) => m.id !== flushedId);
-                    return [
-                      ...filtered,
-                      {
-                        id: flushedId,
-                        content: assistantContent.trim(),
-                        role,
-                        timestamp: Date.now(),
-                      },
-                    ];
-                  });
-                  assistantContent = "";
-                  assistantId = `assistant-${Date.now()}`;
-                }
+              const blockMarker: string | undefined = choice.block_marker;
+              const isThinking = !!choice.thinking;
 
-                currentKind = kind;
-                assistantContent += delta.content;
-
-                // Live-update the streaming message
-                const role = isThinking ? "thinking" as const : "assistant" as const;
-                const liveMsg: DisplayMessage = {
-                  id: assistantId,
-                  content: assistantContent.trim(),
-                  role,
-                  timestamp: Date.now(),
-                };
-                setMessages((prev) => {
-                  const idx = prev.findIndex((m) => m.id === assistantId);
-                  if (idx >= 0) {
-                    const updated = [...prev];
-                    updated[idx] = liveMsg;
-                    return updated;
-                  }
-                  return [...prev, liveMsg];
-                });
-              } else if (delta.tool_calls) {
-                // Flush text before tool calls
+              // Discrete block (tool_use / tool_result / thinking):
+              // flush accumulated text, then add as its own message.
+              if (blockMarker) {
                 if (assistantContent.trim() && currentKind) {
                   const role = currentKind === "thinking" ? "thinking" as const : "assistant" as const;
                   const flushedId = assistantId;
@@ -156,32 +118,63 @@ export function useChatSession(sessionId: string) {
                     const filtered = prev.filter((m) => m.id !== flushedId);
                     return [
                       ...filtered,
-                      {
-                        id: flushedId,
-                        content: assistantContent.trim(),
-                        role,
-                        timestamp: Date.now(),
-                      },
+                      { id: flushedId, content: assistantContent.trim(), role, timestamp: Date.now() },
                     ];
                   });
                   assistantContent = "";
                   assistantId = `assistant-${Date.now()}`;
+                  currentKind = null;
                 }
 
-                for (const tc of delta.tool_calls) {
-                  const name = tc.function?.name;
-                  if (name) {
-                    const toolMsg: DisplayMessage = {
-                      id: `tool-${Date.now()}-${Math.random()}`,
-                      content: name,
-                      role: "tool",
-                      timestamp: Date.now(),
-                    };
-                    setMessages((prev) => [...prev, toolMsg]);
-                  }
+                // Classify the block via classifyMessages for proper
+                // toolType / toolCallId extraction.
+                const classified = classifyMessages([{
+                  id: `block-${Date.now()}-${Math.random()}`,
+                  content: delta.content,
+                  role: "assistant",
+                  created_at: new Date().toISOString(),
+                }]);
+                if (classified.length > 0) {
+                  setMessages((prev) => [...prev, ...classified]);
                 }
-                currentKind = null;
+                continue;
               }
+
+              // Streaming text delta: accumulate.
+              const kind = isThinking ? "thinking" : "text";
+              if (currentKind && currentKind !== kind && assistantContent.trim()) {
+                const role = currentKind === "thinking" ? "thinking" as const : "assistant" as const;
+                const flushedId = assistantId;
+                setMessages((prev) => {
+                  const filtered = prev.filter((m) => m.id !== flushedId);
+                  return [
+                    ...filtered,
+                    { id: flushedId, content: assistantContent.trim(), role, timestamp: Date.now() },
+                  ];
+                });
+                assistantContent = "";
+                assistantId = `assistant-${Date.now()}`;
+              }
+
+              currentKind = kind;
+              assistantContent += delta.content;
+
+              const role = isThinking ? "thinking" as const : "assistant" as const;
+              const liveMsg: DisplayMessage = {
+                id: assistantId,
+                content: assistantContent.trim(),
+                role,
+                timestamp: Date.now(),
+              };
+              setMessages((prev) => {
+                const idx = prev.findIndex((m) => m.id === assistantId);
+                if (idx >= 0) {
+                  const updated = [...prev];
+                  updated[idx] = liveMsg;
+                  return updated;
+                }
+                return [...prev, liveMsg];
+              });
             } catch {
               // Ignore malformed chunks
             }
