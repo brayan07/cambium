@@ -60,8 +60,7 @@ export function classifyMessages(
 
 /** Split a message that may contain multiple [tool_use]/[tool_result]/[thinking] blocks. */
 function _splitBlocks(content: string): string[] {
-  // Split on lines that start with a block marker, keeping the marker with its content
-  const parts = content.split(/\n(?=\[(?:tool_use|tool_result[^\]]*|thinking)\]\s)/);
+  const parts = content.split(/\n(?=\[(?:tool_use[^\]]*|tool_result[^\]]*|thinking)\]\s)/);
   return parts.filter((p) => p.trim());
 }
 
@@ -192,10 +191,15 @@ function ToolCallGroup({ messages }: { messages: DisplayMessage[] }) {
   const [expanded, setExpanded] = useState(false);
   const pairs = pairToolMessages(messages);
 
-  const label =
-    pairs.length === 1
-      ? extractToolName(pairs[0].call.content)
-      : `${pairs.length} tool calls`;
+  if (pairs.length === 1) {
+    return (
+      <div className="mx-4 my-0.5">
+        <ToolCallCard call={pairs[0].call.content} result={pairs[0].result?.content} />
+      </div>
+    );
+  }
+
+  const label = `${pairs.length} tool calls`;
 
   return (
     <div className="mx-4 my-0.5 rounded border border-border/50 bg-surface/50 px-3 py-1.5">

@@ -320,7 +320,7 @@ def delete_session(session_id: str):
     log.info(f"Session {session_id[:8]} ended")
 
 
-_BLOCK_SPLIT_RE = re.compile(r"\n(?=\[(?:tool_use|tool_result[^\]]*|thinking)\]\s)")
+_BLOCK_SPLIT_RE = re.compile(r"\n(?=\[(?:tool_use[^\]]*|tool_result[^\]]*|thinking)\]\s)")
 
 
 def _message_to_chunks(
