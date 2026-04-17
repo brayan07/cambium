@@ -139,6 +139,11 @@ class ClaudeCodeAdapter(AdapterType):
                 "--append-system-prompt-file", str(prompt_file),
             ]
 
+            if config.get("include_core_memories", True) and self.data_dir:
+                core_memories_path = Path(self.data_dir) / "memory" / "core-memories.md"
+                if core_memories_path.exists():
+                    cmd.extend(["--append-system-prompt-file", str(core_memories_path)])
+
             if use_stream_input:
                 cmd.extend(["--input-format", "stream-json"])
 
@@ -445,6 +450,11 @@ class ClaudeCodeAdapter(AdapterType):
             "--add-dir", tmp_dir,
             "--append-system-prompt-file", str(prompt_file),
         ]
+
+        if config.get("include_core_memories", True) and self.data_dir:
+            core_memories_path = Path(self.data_dir) / "memory" / "core-memories.md"
+            if core_memories_path.exists():
+                cmd.extend(["--append-system-prompt-file", str(core_memories_path)])
 
         if resume:
             cmd.extend(["--resume", session_id])
