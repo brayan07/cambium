@@ -29,14 +29,15 @@ export function classifyMessages(
   for (const m of raw) {
     const ts = new Date(m.created_at).getTime();
 
-    // Rate limit events → meta (hidden by default)
+    // Skip non-conversational event types
     if (m.role === "rate_limit_event" || m.content.startsWith("[rate_limit]")) {
-      continue; // skip entirely — noise
+      continue;
     }
-
-    // System init messages → meta
     if (m.content.startsWith("[system:")) {
-      continue; // skip — internal bookkeeping
+      continue;
+    }
+    if (m.role === "ai-title" || m.role === "last-prompt") {
+      continue;
     }
 
     // The adapter may join multiple content blocks (tool_use, tool_result,
@@ -60,8 +61,7 @@ export function classifyMessages(
 
 /** Split a message that may contain multiple [tool_use]/[tool_result]/[thinking] blocks. */
 function _splitBlocks(content: string): string[] {
-  // Split on lines that start with a block marker, keeping the marker with its content
-  const parts = content.split(/\n(?=\[(?:tool_use|tool_result[^\]]*|thinking)\]\s)/);
+  const parts = content.split(/\n(?=\[(?:tool_use[^\]]*|tool_result[^\]]*|thinking)\]\s)/);
   return parts.filter((p) => p.trim());
 }
 
@@ -192,10 +192,15 @@ function ToolCallGroup({ messages }: { messages: DisplayMessage[] }) {
   const [expanded, setExpanded] = useState(false);
   const pairs = pairToolMessages(messages);
 
-  const label =
-    pairs.length === 1
-      ? extractToolName(pairs[0].call.content)
-      : `${pairs.length} tool calls`;
+  if (pairs.length === 1) {
+    return (
+      <div className="mx-4 my-0.5">
+        <ToolCallCard call={pairs[0].call.content} result={pairs[0].result?.content} />
+      </div>
+    );
+  }
+
+  const label = `${pairs.length} tool calls`;
 
   return (
     <div className="mx-4 my-0.5 rounded border border-border/50 bg-surface/50 px-3 py-1.5">
