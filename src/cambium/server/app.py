@@ -427,7 +427,9 @@ async def lifespan(app: FastAPI):
     global _server
     if _server is not None:
         await _server.start_consumer()
+    await terminal_module.start_idle_reaper()
     yield
+    await terminal_module.stop_idle_reaper()
     if _server is not None:
         await _server.stop_consumer()
 

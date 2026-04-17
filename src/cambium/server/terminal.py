@@ -2,6 +2,11 @@
 
 Spawns a pseudo-terminal running `cambium chat <routine>` and bridges
 stdin/stdout over a WebSocket connection to the browser's xterm.js.
+
+PTY lifecycle is decoupled from WebSocket lifecycle: PTYs persist after
+WebSocket disconnects and are only cleaned up after an idle timeout or
+natural exit. A background reader continuously buffers PTY output so
+reconnecting clients can receive missed data.
 """
 
 from __future__ import annotations
@@ -16,6 +21,7 @@ import signal
 import struct
 import termios
 import time
+from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -25,11 +31,11 @@ log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/terminal", tags=["terminal"])
 
-# 15-minute idle timeout (seconds)
 IDLE_TIMEOUT = 15 * 60
+OUTPUT_BUFFER_MAX = 100_000
 
-
-_DB_TOUCH_INTERVAL = 120  # seconds between DB heartbeats
+_DB_TOUCH_INTERVAL = 120
+_REAPER_INTERVAL = 60
 
 
 @dataclass
@@ -38,12 +44,15 @@ class PtySession:
 
     session_id: str
     pid: int
-    fd: int  # PTY master file descriptor
-    last_input: float = field(default_factory=time.time)
+    fd: int
+    last_activity: float = field(default_factory=time.time)
     last_db_touch: float = field(default_factory=time.time)
+    output_buffer: deque = field(default_factory=lambda: deque(maxlen=OUTPUT_BUFFER_MAX))
+    _connected_ws: WebSocket | None = field(default=None, repr=False)
+    _reader_task: asyncio.Task | None = field(default=None, repr=False)
+    _lock: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False)
 
     def resize(self, rows: int, cols: int) -> None:
-        """Send TIOCSWINSZ to the PTY."""
         try:
             winsize = struct.pack("HHHH", rows, cols, 0, 0)
             fcntl.ioctl(self.fd, termios.TIOCSWINSZ, winsize)
@@ -51,7 +60,8 @@ class PtySession:
             pass
 
     def kill(self) -> None:
-        """Terminate the PTY child process and close the fd."""
+        if self._reader_task and not self._reader_task.done():
+            self._reader_task.cancel()
         try:
             os.kill(self.pid, signal.SIGTERM)
         except ProcessLookupError:
@@ -63,21 +73,37 @@ class PtySession:
 
     @property
     def alive(self) -> bool:
-        """Check if the child process is still running."""
         try:
             pid, _ = os.waitpid(self.pid, os.WNOHANG)
             return pid == 0
         except ChildProcessError:
             return False
 
+    async def attach_ws(self, ws: WebSocket) -> None:
+        async with self._lock:
+            self._connected_ws = ws
 
-# Registry of active PTY sessions
+    async def detach_ws(self) -> None:
+        async with self._lock:
+            self._connected_ws = None
+
+    async def send_to_ws(self, data: bytes) -> bool:
+        async with self._lock:
+            if self._connected_ws is None:
+                return False
+            try:
+                await self._connected_ws.send_bytes(data)
+                return True
+            except Exception:
+                self._connected_ws = None
+                return False
+
+
 _pty_sessions: dict[str, PtySession] = {}
-
-# Server configuration — set by configure()
 _repo_dir: Path | None = None
 _data_dir: Path | None = None
 _session_store = None
+_reaper_task: asyncio.Task | None = None
 
 
 def configure(
@@ -85,15 +111,49 @@ def configure(
     data_dir: Path | None = None,
     session_store=None,
 ) -> None:
-    """Set directory paths and session store for spawning cambium chat commands."""
     global _repo_dir, _data_dir, _session_store
     _repo_dir = repo_dir
     _data_dir = data_dir
     _session_store = session_store
 
 
+async def start_idle_reaper() -> None:
+    global _reaper_task
+    _reaper_task = asyncio.create_task(_idle_reaper_loop())
+    log.info("PTY idle reaper started")
+
+
+async def stop_idle_reaper() -> None:
+    global _reaper_task
+    if _reaper_task:
+        _reaper_task.cancel()
+        try:
+            await _reaper_task
+        except asyncio.CancelledError:
+            pass
+        _reaper_task = None
+        log.info("PTY idle reaper stopped")
+
+
+async def _idle_reaper_loop() -> None:
+    while True:
+        await asyncio.sleep(_REAPER_INTERVAL)
+        now = time.time()
+        to_reap = []
+        for sid, session in list(_pty_sessions.items()):
+            if not session.alive:
+                to_reap.append((sid, "exited"))
+            elif now - session.last_activity > IDLE_TIMEOUT:
+                to_reap.append((sid, "idle"))
+        for sid, reason in to_reap:
+            session = _pty_sessions.get(sid)
+            if session is None:
+                continue
+            log.info(f"PTY reaper: {reason} — {sid[:8]}")
+            _destroy_session(session)
+
+
 def _touch_session_db(session: PtySession) -> None:
-    """Update session updated_at in DB if enough time has passed."""
     now = time.time()
     if now - session.last_db_touch < _DB_TOUCH_INTERVAL:
         return
@@ -111,7 +171,6 @@ async def terminal_new(
     ws: WebSocket,
     routine: str = Query(default="interlocutor"),
 ):
-    """Create a new session and open a terminal."""
     await ws.accept()
 
     try:
@@ -122,25 +181,27 @@ async def terminal_new(
         return
 
     _pty_sessions[session.session_id] = session
+    _start_background_reader(session)
     log.info(f"PTY new: routine={routine} session={session.session_id[:8]}")
 
-    # Register in Cambium's session DB so it appears in the session list
     _register_session(session.session_id, routine)
 
-    # Tell the UI which session ID was assigned — must arrive before PTY output
     await ws.send_text(json.dumps({
         "type": "session_init",
         "session_id": session.session_id,
         "routine": routine,
     }))
 
-    ended_naturally = False
     try:
-        ended_naturally = await _bridge(ws, session)
+        ended_naturally = await _attach_and_bridge(ws, session)
     except WebSocketDisconnect:
         log.info(f"PTY WebSocket disconnected: {session.session_id[:8]}")
+        ended_naturally = False
     finally:
-        _cleanup(session, ended_naturally=ended_naturally)
+        await session.detach_ws()
+
+    if ended_naturally:
+        _destroy_session(session)
 
 
 @router.websocket("/{session_id}")
@@ -149,23 +210,21 @@ async def terminal_attach(
     session_id: str,
     routine: str = Query(default="interlocutor"),
 ):
-    """Reopen an existing session with --resume."""
     await ws.accept()
 
-    # If a PTY is already alive for this session, reuse it
     existing = _pty_sessions.get(session_id)
     if existing and existing.alive:
         log.info(f"PTY reattach: {session_id[:8]}")
-        ended_naturally = False
         try:
-            ended_naturally = await _bridge(ws, existing)
+            ended_naturally = await _attach_and_bridge(ws, existing)
         except WebSocketDisconnect:
-            pass
+            ended_naturally = False
+        finally:
+            await existing.detach_ws()
         if ended_naturally:
-            _cleanup(existing, ended_naturally=True)
+            _destroy_session(existing)
         return
 
-    # Otherwise, spawn a new PTY that resumes the session
     try:
         session = _spawn_pty(routine=routine, session_id=session_id, resume=True)
     except Exception as e:
@@ -174,19 +233,20 @@ async def terminal_attach(
         return
 
     _pty_sessions[session.session_id] = session
-
-    # Re-activate in DB (it was completed when the previous PTY exited)
+    _start_background_reader(session)
     _reactivate_session(session_id)
-
     log.info(f"PTY resume: session={session_id[:8]}")
 
-    ended_naturally = False
     try:
-        ended_naturally = await _bridge(ws, session)
+        ended_naturally = await _attach_and_bridge(ws, session)
     except WebSocketDisconnect:
         log.info(f"PTY WebSocket disconnected: {session_id[:8]}")
+        ended_naturally = False
     finally:
-        _cleanup(session, ended_naturally=ended_naturally)
+        await session.detach_ws()
+
+    if ended_naturally:
+        _destroy_session(session)
 
 
 def _spawn_pty(
@@ -194,26 +254,18 @@ def _spawn_pty(
     session_id: str | None = None,
     resume: bool = False,
 ) -> PtySession:
-    """Fork a PTY running `cambium chat <routine>`.
-
-    Replicates the adapter's attach() logic but in a child process
-    instead of os.execvp (which would replace the server).
-    """
     import sys
     import uuid
 
     if session_id is None:
         session_id = str(uuid.uuid4())
 
-    # Build the cambium chat command — use the same Python that's running
-    # the server so we don't depend on `cambium` being on PATH.
     cmd = [sys.executable, "-m", "cambium", "chat", routine, "--session-id", session_id]
     if resume:
         cmd.append("--resume")
     else:
         cmd.extend(["--message", "Session started from Cambium UI."])
 
-    # Build environment with directory paths
     env = os.environ.copy()
     if _repo_dir:
         env["CAMBIUM_CONFIG_DIR"] = str(_repo_dir)
@@ -224,10 +276,8 @@ def _spawn_pty(
 
     pid, fd = pty.fork()
     if pid == 0:
-        # Child process — exec into cambium chat
         os.execvpe(cmd[0], cmd, env)
     else:
-        # Parent — set non-blocking reads on the PTY master
         os.set_blocking(fd, False)
         return PtySession(
             session_id=session_id,
@@ -236,34 +286,52 @@ def _spawn_pty(
         )
 
 
-async def _bridge(ws: WebSocket, session: PtySession) -> bool:
-    """Bidirectional bridge between WebSocket and PTY fd.
+def _start_background_reader(session: PtySession) -> None:
+    session._reader_task = asyncio.create_task(_background_reader(session))
 
-    Returns True if the PTY process ended naturally (EOF), False if the
-    WebSocket disconnected (user left) or idle timeout fired.
-    """
+
+async def _background_reader(session: PtySession) -> None:
+    """Read PTY output continuously; send to WS or buffer when disconnected."""
     loop = asyncio.get_event_loop()
+    while True:
+        try:
+            data = await loop.run_in_executor(None, _blocking_read, session.fd)
+        except Exception:
+            break
+        if data is None:
+            break
+        if data:
+            session.last_activity = time.time()
+            sent = await session.send_to_ws(data)
+            if not sent:
+                session.output_buffer.extend(data)
 
-    async def read_pty() -> None:
-        """PTY stdout -> WebSocket."""
-        while True:
+
+async def _attach_and_bridge(ws: WebSocket, session: PtySession) -> bool:
+    """Attach a WebSocket to an existing PTY session.
+
+    Drains buffered output, then forwards WS input to PTY stdin.
+    Returns True if the PTY process ended during this connection.
+    """
+    async with session._lock:
+        if session.output_buffer:
+            buffered = bytes(session.output_buffer)
+            session.output_buffer.clear()
             try:
-                data = await loop.run_in_executor(
-                    None, _blocking_read, session.fd
-                )
-                if data is None:
-                    # EOF — child process exited
-                    break
-                if data:
-                    await ws.send_bytes(data)
-                # Empty bytes (b"") means select() timed out — just loop
-            except OSError:
-                break
+                await ws.send_bytes(buffered)
             except Exception:
-                break
+                return False
+        session._connected_ws = ws
 
+    return await _ws_input_loop(ws, session)
+
+
+async def _ws_input_loop(ws: WebSocket, session: PtySession) -> bool:
+    """Read WebSocket messages and write to PTY stdin.
+
+    Returns True if PTY exited naturally during this session.
+    """
     async def write_pty() -> None:
-        """WebSocket -> PTY stdin."""
         while True:
             try:
                 msg = await ws.receive()
@@ -277,7 +345,6 @@ async def _bridge(ws: WebSocket, session: PtySession) -> bool:
                 data = msg["bytes"]
             elif "text" in msg:
                 text = msg["text"]
-                # Handle resize events: {"type":"resize","rows":N,"cols":N}
                 if text.startswith("{"):
                     try:
                         event = json.loads(text)
@@ -285,7 +352,7 @@ async def _bridge(ws: WebSocket, session: PtySession) -> bool:
                             session.resize(event["rows"], event["cols"])
                             continue
                         if event.get("type") == "keepalive":
-                            session.last_input = time.time()
+                            session.last_activity = time.time()
                             _touch_session_db(session)
                             continue
                     except json.JSONDecodeError:
@@ -298,26 +365,18 @@ async def _bridge(ws: WebSocket, session: PtySession) -> bool:
                 os.write(session.fd, data)
             except OSError:
                 break
-            session.last_input = time.time()
+            session.last_activity = time.time()
             _touch_session_db(session)
 
-    async def idle_watchdog() -> None:
-        """Kill PTY after IDLE_TIMEOUT seconds of no input."""
-        while True:
-            await asyncio.sleep(60)
-            if not session.alive:
-                break
-            if time.time() - session.last_input > IDLE_TIMEOUT:
-                log.info(f"PTY idle timeout: {session.session_id[:8]}")
-                session.kill()
-                break
+    async def watch_pty_exit() -> None:
+        while session.alive:
+            await asyncio.sleep(2)
 
-    read_task = asyncio.create_task(read_pty())
     write_task = asyncio.create_task(write_pty())
-    watchdog_task = asyncio.create_task(idle_watchdog())
+    exit_task = asyncio.create_task(watch_pty_exit())
 
     done, pending = await asyncio.wait(
-        [read_task, write_task, watchdog_task],
+        [write_task, exit_task],
         return_when=asyncio.FIRST_COMPLETED,
     )
     for task in pending:
@@ -327,34 +386,22 @@ async def _bridge(ws: WebSocket, session: PtySession) -> bool:
         except asyncio.CancelledError:
             pass
 
-    # PTY EOF (read_pty finished) means the session ended naturally
-    return read_task in done
+    return exit_task in done
 
 
 def _blocking_read(fd: int) -> bytes | None:
-    """Blocking read from PTY fd.
-
-    Uses select() with a short timeout so the executor thread doesn't
-    block forever if the PTY goes idle.
-
-    Returns:
-        bytes: data read from PTY
-        b"": select() timed out, no data available (not EOF)
-        None: EOF — child process has exited
-    """
     import select
 
     ready, _, _ = select.select([fd], [], [], 1.0)
     if ready:
         data = os.read(fd, 4096)
         if not data:
-            return None  # EOF
+            return None
         return data
     return b""
 
 
 def _register_session(session_id: str, routine: str) -> None:
-    """Register a PTY-spawned session in Cambium's session DB."""
     if _session_store is None:
         log.warning("No session store — PTY session won't appear in session list")
         return
@@ -380,7 +427,6 @@ def _register_session(session_id: str, routine: str) -> None:
 
 
 def _reactivate_session(session_id: str) -> None:
-    """Mark a session as active again when the user resumes it."""
     if _session_store is None:
         return
     try:
@@ -392,7 +438,6 @@ def _reactivate_session(session_id: str) -> None:
 
 
 def _complete_session(session_id: str) -> None:
-    """Mark a PTY session as completed in Cambium's session DB."""
     if _session_store is None:
         return
     try:
@@ -403,22 +448,9 @@ def _complete_session(session_id: str) -> None:
         log.error(f"Failed to complete PTY session: {e}")
 
 
-def _cleanup(session: PtySession, ended_naturally: bool = False) -> None:
-    """Kill PTY and remove from registry.
-
-    Args:
-        ended_naturally: True if the PTY child process exited on its own
-            (user typed /exit, conversation concluded). False if the user
-            just disconnected the WebSocket (detach — session can be resumed).
-    """
-    was_alive = session.alive
+def _destroy_session(session: PtySession) -> None:
+    """Kill PTY, remove from registry, mark completed in DB."""
     session.kill()
     _pty_sessions.pop(session.session_id, None)
-
-    if ended_naturally or not was_alive:
-        # Session truly ended — mark completed
-        _complete_session(session.session_id)
-        log.info(f"PTY session ended: {session.session_id[:8]}")
-    else:
-        # User detached — keep session as active so they can resume
-        log.info(f"PTY detached (session stays active): {session.session_id[:8]}")
+    _complete_session(session.session_id)
+    log.info(f"PTY session destroyed: {session.session_id[:8]}")
