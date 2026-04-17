@@ -57,7 +57,15 @@ End-of-cycle rollup (runs at 6:00 AM UTC).
    - {list of knowledge entries created or modified}
    ```
 4. Review knowledge entries that were modified today — are confidence levels appropriate?
-5. **Metric triage** — check for critical declines that shouldn't wait for the weekly review:
+5. **Maintain core memories** — Update `$CAMBIUM_DATA_DIR/memory/core-memories.md` by reading all knowledge entries and distilling the information that would help any routine orient and make good decisions. Think about what every session should know but currently doesn't. Include key user preferences, system architecture facts, active patterns, and important lessons learned. Keep it under 200 lines. The tone should be direct and factual — this is a briefing document, not a summary.
+   ```bash
+   # Read all current knowledge
+   find $CAMBIUM_DATA_DIR/memory/knowledge/ -name "*.md" -not -name "_index.md" | sort | while read f; do echo "=== $f ==="; cat "$f"; done
+   # Read existing core-memories if present
+   cat $CAMBIUM_DATA_DIR/memory/core-memories.md 2>/dev/null || echo "(no existing core-memories)"
+   ```
+   Write the updated file to `$CAMBIUM_DATA_DIR/memory/core-memories.md`. It will be committed in the daily consolidation commit (step 8).
+6. **Metric triage** — check for critical declines that shouldn't wait for the weekly review:
    ```bash
    METRICS=$(curl -s "$CAMBIUM_API_URL/metrics")
    # For each metric, fetch the summary
@@ -71,8 +79,8 @@ End-of-cycle rollup (runs at 6:00 AM UTC).
    For critical alerts, publish a `health_observation` to `thoughts` with severity `warning` and include the metric name, current value, and prior value. Do NOT attempt full correlation or propose specific file changes — that's the weekly review's job. The daily triage is an early warning, not a diagnosis.
 
    If no metric is critical, skip this step silently.
-6. Update `last_daily_digest` in consolidator state
-7. Commit
+7. Update `last_daily_digest` in consolidator state
+8. Commit
 
 #### window: "weekly"
 Broader review (runs Monday 6:00 AM UTC).
