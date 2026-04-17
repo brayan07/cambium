@@ -1,5 +1,6 @@
 import { BrowserRouter, Routes, Route, Navigate } from "react-router";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { TerminalProvider } from "./contexts/TerminalContext";
 import { Layout } from "./components/Layout";
 import { ChatPage } from "./pages/ChatPage";
 import { InboxPage } from "./pages/InboxPage";
@@ -20,6 +21,7 @@ const queryClient = new QueryClient({
 export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
+      <TerminalProvider>
       <BrowserRouter>
         <Routes>
           <Route element={<Layout />}>
@@ -33,6 +35,7 @@ export default function App() {
           </Route>
         </Routes>
       </BrowserRouter>
+      </TerminalProvider>
     </QueryClientProvider>
   );
 }

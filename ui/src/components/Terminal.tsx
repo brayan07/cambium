@@ -1,189 +1,75 @@
 import { useEffect, useRef, useState } from "react";
-import { Terminal as XTerm } from "@xterm/xterm";
-import { AttachAddon } from "@xterm/addon-attach";
-import { FitAddon } from "@xterm/addon-fit";
-import { WebLinksAddon } from "@xterm/addon-web-links";
 import "@xterm/xterm/css/xterm.css";
-import { terminalWsUrl } from "../lib/api";
+import {
+  useTerminalContext,
+  type ConnectionState,
+  type TerminalSession,
+} from "../contexts/TerminalContext";
 
 interface TerminalProps {
-  /** WebSocket path (e.g., "/terminal/new?routine=interlocutor") */
   wsPath: string;
-  /** Called when the terminal session ends (WebSocket closes) */
   onSessionEnd?: () => void;
-  /** Called when the server reports the real Cambium session ID */
   onSessionId?: (sessionId: string) => void;
 }
 
-type ConnectionState = "connecting" | "connected" | "disconnected" | "error";
-
-const THEME = {
-  background: "#0a0a0f",
-  foreground: "#e0e0e8",
-  cursor: "#d4a843",
-  cursorAccent: "#0a0a0f",
-  selectionBackground: "#d4a84366",
-  selectionForeground: "#e0e0e8",
-  black: "#0a0a0f",
-  red: "#ef4444",
-  green: "#4ade80",
-  yellow: "#d4a843",
-  blue: "#60a5fa",
-  magenta: "#c084fc",
-  cyan: "#22d3ee",
-  white: "#e0e0e8",
-  brightBlack: "#555570",
-  brightRed: "#f87171",
-  brightGreen: "#86efac",
-  brightYellow: "#e0b850",
-  brightBlue: "#93c5fd",
-  brightMagenta: "#d8b4fe",
-  brightCyan: "#67e8f9",
-  brightWhite: "#ffffff",
-};
-
 export function Terminal({ wsPath, onSessionEnd, onSessionId }: TerminalProps) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const termRef = useRef<XTerm | null>(null);
-  const wsRef = useRef<WebSocket | null>(null);
-  const fitRef = useRef<FitAddon | null>(null);
+  const sessionRef = useRef<TerminalSession | null>(null);
   const onSessionEndRef = useRef(onSessionEnd);
   onSessionEndRef.current = onSessionEnd;
   const onSessionIdRef = useRef(onSessionId);
   onSessionIdRef.current = onSessionId;
   const [state, setState] = useState<ConnectionState>("connecting");
+  const ctx = useTerminalContext();
 
   useEffect(() => {
     if (!containerRef.current) return;
 
-    // Create terminal
-    const term = new XTerm({
-      theme: THEME,
-      fontFamily: "'JetBrains Mono', monospace",
-      fontSize: 13,
-      lineHeight: 1.4,
-      cursorBlink: true,
-      cursorStyle: "bar",
-      scrollback: 10000,
-      allowProposedApi: true,
+    const session = ctx.getOrCreate(wsPath, {
+      onSessionId: (id) => onSessionIdRef.current?.(id),
+      onSessionEnd: () => onSessionEndRef.current?.(),
+      onStateChange: setState,
     });
-    termRef.current = term;
+    sessionRef.current = session;
 
-    // Addons
-    const fitAddon = new FitAddon();
-    fitRef.current = fitAddon;
-    term.loadAddon(fitAddon);
-    term.loadAddon(new WebLinksAddon());
+    setState(session.state);
 
-    // Mount
-    term.open(containerRef.current);
-    fitAddon.fit();
+    // Adopt the context-owned DOM element into our container
+    containerRef.current.appendChild(session.containerEl);
 
-    // Connect WebSocket
-    const url = terminalWsUrl(wsPath);
-    const ws = new WebSocket(url);
-    wsRef.current = ws;
-
-    ws.binaryType = "arraybuffer";
-
-    ws.onopen = () => {
-      setState("connected");
-
-      // The server may send a JSON control message (session_init) before
-      // PTY output. Intercept it, then hand the socket to AttachAddon.
-      const earlyHandler = (ev: MessageEvent) => {
-        // Control messages arrive as text (string), PTY data as ArrayBuffer
-        if (typeof ev.data === "string") {
-          try {
-            const ctrl = JSON.parse(ev.data);
-            if (ctrl.type === "session_init" && ctrl.session_id) {
-              onSessionIdRef.current?.(ctrl.session_id);
-            }
-          } catch {
-            // Not JSON — shouldn't happen, but write to terminal if it does
-            term.write(ev.data);
-          }
-          return;
-        }
-        // Binary data means PTY output has started — attach and replay
-        ws.removeEventListener("message", earlyHandler);
-        const attachAddon = new AttachAddon(ws);
-        term.loadAddon(attachAddon);
-        // Write this first binary chunk that AttachAddon missed
-        term.write(new Uint8Array(ev.data));
-      };
-      ws.addEventListener("message", earlyHandler);
-
-      // If no message arrives within 2s, attach anyway (resume case — server
-      // may not send session_init for resumes since UI already knows the ID)
-      setTimeout(() => {
-        ws.removeEventListener("message", earlyHandler);
-        // Only attach if AttachAddon wasn't loaded yet
-        if (term.buffer.normal.length <= 1) {
-          const attachAddon = new AttachAddon(ws);
-          term.loadAddon(attachAddon);
-        }
-      }, 2000);
-
-      // Send initial resize
-      const dims = fitAddon.proposeDimensions();
-      if (dims) {
-        ws.send(
-          JSON.stringify({ type: "resize", rows: dims.rows, cols: dims.cols }),
-        );
-      }
-
-      term.focus();
-    };
-
-    ws.onclose = () => {
-      setState("disconnected");
-      onSessionEndRef.current?.();
-    };
-
-    ws.onerror = () => {
-      setState("error");
-    };
-
-    // Handle container resize
+    // Set up resize handling for this mount
     const observer = new ResizeObserver(() => {
-      fitAddon.fit();
-      if (ws.readyState === WebSocket.OPEN) {
-        const dims = fitAddon.proposeDimensions();
+      session.fitAddon.fit();
+      if (session.ws.readyState === WebSocket.OPEN) {
+        const dims = session.fitAddon.proposeDimensions();
         if (dims) {
-          ws.send(
-            JSON.stringify({
-              type: "resize",
-              rows: dims.rows,
-              cols: dims.cols,
-            }),
+          session.ws.send(
+            JSON.stringify({ type: "resize", rows: dims.rows, cols: dims.cols }),
           );
         }
       }
     });
     observer.observe(containerRef.current);
+    session.resizeObserver = observer;
 
-    // Keepalive ping every 60s
-    const keepalive = setInterval(() => {
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: "keepalive" }));
-      }
-    }, 60_000);
+    // Refit after attach in case container size changed
+    requestAnimationFrame(() => {
+      session.fitAddon.fit();
+      session.term.focus();
+    });
 
     return () => {
-      clearInterval(keepalive);
       observer.disconnect();
-      ws.close();
-      term.dispose();
-      termRef.current = null;
-      wsRef.current = null;
-      fitRef.current = null;
+      session.resizeObserver = null;
+      // Detach the terminal element but don't destroy it
+      if (session.containerEl.parentNode) {
+        session.containerEl.parentNode.removeChild(session.containerEl);
+      }
     };
-  }, [wsPath]);
+  }, [wsPath, ctx]);
 
   return (
     <div className="relative flex h-full w-full flex-col">
-      {/* Connection status overlay */}
       {state === "connecting" && (
         <div className="absolute inset-0 z-10 flex items-center justify-center bg-base/80">
           <div className="flex items-center gap-2 font-display text-sm text-accent">
@@ -214,7 +100,6 @@ export function Terminal({ wsPath, onSessionEnd, onSessionId }: TerminalProps) {
         </div>
       )}
 
-      {/* Terminal container */}
       <div ref={containerRef} className="flex-1 p-1" />
     </div>
   );
