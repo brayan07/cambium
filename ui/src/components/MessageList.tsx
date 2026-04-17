@@ -29,14 +29,15 @@ export function classifyMessages(
   for (const m of raw) {
     const ts = new Date(m.created_at).getTime();
 
-    // Rate limit events → meta (hidden by default)
+    // Skip non-conversational event types
     if (m.role === "rate_limit_event" || m.content.startsWith("[rate_limit]")) {
-      continue; // skip entirely — noise
+      continue;
     }
-
-    // System init messages → meta
     if (m.content.startsWith("[system:")) {
-      continue; // skip — internal bookkeeping
+      continue;
+    }
+    if (m.role === "ai-title" || m.role === "last-prompt") {
+      continue;
     }
 
     // The adapter may join multiple content blocks (tool_use, tool_result,
