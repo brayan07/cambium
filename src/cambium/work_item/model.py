@@ -118,6 +118,7 @@ class WorkItemEvent:
     session_id: str | None
     data: dict[str, Any]
     created_at: str
+    seq: int | None = None
 
     @classmethod
     def create(

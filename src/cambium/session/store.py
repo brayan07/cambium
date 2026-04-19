@@ -169,7 +169,7 @@ class SessionStore:
                 params.append(origin.value)
             if conditions:
                 query += " WHERE " + " AND ".join(conditions)
-            query += " ORDER BY created_at DESC LIMIT ?"
+            query += " ORDER BY created_at DESC, rowid DESC LIMIT ?"
             params.append(limit)
 
             rows = self._conn.execute(query, params).fetchall()

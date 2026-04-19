@@ -1,5 +1,7 @@
 """Tests for work item store."""
 
+from datetime import datetime, timedelta, timezone
+
 import pytest
 
 from cambium.work_item.model import (
@@ -514,15 +516,18 @@ class TestEventLog:
 
     def test_filter_by_after(self):
         store = WorkItemStore()
+        # Capture a timestamp guaranteed to be before any events
+        before = (datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat()
+
         item = WorkItem.create(title="Task")
         store.create(item)
-
-        first_event = store.get_events(item_id=item.id)[0]
         store.update_status(item.id, WorkItemStatus.READY)
 
-        events = store.get_events(item_id=item.id, after=first_event.created_at)
-        assert len(events) == 1
-        assert events[0].event_type == "status_changed"
+        # "after" the pre-creation timestamp should return all events
+        events = store.get_events(item_id=item.id, after=before)
+        assert len(events) == 2
+        assert events[0].event_type == "created"
+        assert events[1].event_type == "status_changed"
 
     def test_global_events_query(self):
         store = WorkItemStore()
